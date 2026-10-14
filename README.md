@@ -2,6 +2,8 @@
 
 一个仓库管理多个面向手机端的 React + Vite PWA。每个应用独立开发、独立生成 PWA manifest 和 Service Worker，构建时汇总到同一个 `dist/`，由一次 GitHub Pages 部署发布。
 
+第一次接触 PWA？参见 [PWA 是什么，以及本项目如何使用它](docs/pwa.md)。
+
 目前包含：
 
 | 应用 | 地址 | 功能 |

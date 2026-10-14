@@ -155,7 +155,7 @@ function App() {
   return <main>
     {current ? <section className="detail">
       <div className="detail-bar"><button className="back" onClick={() => setSelected(null)} aria-label="返回笔记列表"><span aria-hidden="true">‹</span> 笔记</button><span className="saved">自动保存</span></div>
-      <input className="title-input" aria-label="标题" value={current.title} onChange={event => edit({ title: event.target.value })} placeholder="标题" autoFocus />
+      <input className="title-input" aria-label="标题" value={current.title} onChange={event => edit({ title: event.target.value })} placeholder="标题" />
       <p className="edit-date">{new Date(current.updated).toLocaleString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
       <textarea aria-label="内容" value={current.body} onChange={event => edit({ body: event.target.value })} placeholder="开始记录…" />
     </section> : <section className="list-page">
