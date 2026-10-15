@@ -15,7 +15,7 @@ export type Margins = { horizontal: number; vertical: number; captionSpace?: num
 export function defaultMargins(template: TemplateId): Margins {
   if (template === 'normal-2') return { horizontal: 52, vertical: 52 };
   if (template === 'normal-4') return { horizontal: 44, vertical: 44 };
-  if (template === 'polaroid-1') return { horizontal: 72, vertical: 48, captionSpace: 300 };
+  if (template === 'polaroid-1') return { horizontal: 46, vertical: 62, captionSpace: 300 };
   if (template === 'polaroid-2') return { horizontal: 72, vertical: 48, captionSpace: 200 };
   return { horizontal: 0, vertical: 0 };
 }
