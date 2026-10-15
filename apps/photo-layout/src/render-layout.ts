@@ -11,12 +11,12 @@ export const templates = [
 export type TemplateId = typeof templates[number]['id'];
 export type Rect = { x: number; y: number; w: number; h: number };
 export type Frame = Rect & { rotation: number };
-export type Margins = { horizontal: number; vertical: number };
+export type Margins = { horizontal: number; vertical: number; captionSpace?: number };
 export function defaultMargins(template: TemplateId): Margins {
   if (template === 'normal-2') return { horizontal: 52, vertical: 52 };
   if (template === 'normal-4') return { horizontal: 44, vertical: 44 };
-  if (template === 'polaroid-1') return { horizontal: 86, vertical: 86 };
-  if (template === 'polaroid-2') return { horizontal: 72, vertical: 72 };
+  if (template === 'polaroid-1') return { horizontal: 72, vertical: 48, captionSpace: 300 };
+  if (template === 'polaroid-2') return { horizontal: 72, vertical: 48, captionSpace: 200 };
   return { horizontal: 0, vertical: 0 };
 }
 export type PhotoAdjustment = { zoom: number; offsetX: number; offsetY: number; rotation: number };
@@ -78,12 +78,15 @@ export function getLayout(template: TemplateId, frames = initialFrames(template)
     ] };
   }
   if (template === 'polaroid-1') return { width, height, slots: [
-    { label: '拍立得照片', rect: { x: h + 98, y: v + 98, w: width - 2 * h - 196, h: height - 2 * v - 468 } },
+    { label: '拍立得照片', rect: { x: h, y: v, w: width - 2 * h, h: height - 2 * v - (margins.captionSpace ?? 300) } },
   ] };
-  if (template === 'polaroid-2') return { width, height, slots: [
-    { label: '左侧照片', rect: { x: h + 83, y: v + 83, w: (width - 2 * (h + 48) - 36) / 2 - 70, h: height - 2 * v - 321 } },
-    { label: '右侧照片', rect: { x: (width + 36) / 2 + 35, y: v + 83, w: (width - 2 * (h + 48) - 36) / 2 - 70, h: height - 2 * v - 321 } },
-  ] };
+  if (template === 'polaroid-2') {
+    const photoWidth = (width - 3 * h) / 2;
+    return { width, height, slots: [
+      { label: '左侧照片', rect: { x: h, y: v, w: photoWidth, h: height - 2 * v - (margins.captionSpace ?? 200) } },
+      { label: '右侧照片', rect: { x: 2 * h + photoWidth, y: v, w: photoWidth, h: height - 2 * v - (margins.captionSpace ?? 200) } },
+    ] };
+  }
   return { width, height, slots: [{ label: '证件照原图', rect: { x: 65, y: 95, w: 1670, h: 1000 } }] };
 }
 
@@ -97,18 +100,36 @@ function loadImage(file: File): Promise<HTMLImageElement> {
   });
 }
 
-function drawAdjusted(ctx: CanvasRenderingContext2D, image: HTMLImageElement, rect: Rect, adjustment = defaultAdjustment()) {
+function adjustedTransform(image: HTMLImageElement, rect: Rect, adjustment: PhotoAdjustment) {
   const angle = adjustment.rotation * Math.PI / 180;
-  const cos = Math.abs(Math.cos(angle));
-  const sin = Math.abs(Math.sin(angle));
-  const dx = adjustment.offsetX * rect.w;
-  const dy = adjustment.offsetY * rect.h;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const absCos = Math.abs(cos);
+  const absSin = Math.abs(sin);
   const cover = Math.max(rect.w / image.naturalWidth, rect.h / image.naturalHeight);
   const rotatedCover = Math.max(
-    (cos * (rect.w + 2 * Math.abs(dx)) + sin * (rect.h + 2 * Math.abs(dy))) / image.naturalWidth,
-    (sin * (rect.w + 2 * Math.abs(dx)) + cos * (rect.h + 2 * Math.abs(dy))) / image.naturalHeight,
+    (absCos * rect.w + absSin * rect.h) / image.naturalWidth,
+    (absSin * rect.w + absCos * rect.h) / image.naturalHeight,
   );
   const scale = Math.max(cover * adjustment.zoom, rotatedCover);
+  const requestedX = adjustment.offsetX * rect.w;
+  const requestedY = adjustment.offsetY * rect.h;
+  const maxLocalX = Math.max(0, (image.naturalWidth * scale - absCos * rect.w - absSin * rect.h) / 2);
+  const maxLocalY = Math.max(0, (image.naturalHeight * scale - absSin * rect.w - absCos * rect.h) / 2);
+  const localX = Math.max(-maxLocalX, Math.min(maxLocalX, cos * requestedX + sin * requestedY));
+  const localY = Math.max(-maxLocalY, Math.min(maxLocalY, -sin * requestedX + cos * requestedY));
+  const dx = cos * localX - sin * localY;
+  const dy = sin * localX + cos * localY;
+  return { angle, scale, dx, dy };
+}
+
+export function clampAdjustment(image: HTMLImageElement, rect: Rect, adjustment: PhotoAdjustment): PhotoAdjustment {
+  const { dx, dy } = adjustedTransform(image, rect, adjustment);
+  return { ...adjustment, offsetX: dx / rect.w, offsetY: dy / rect.h };
+}
+
+export function drawAdjusted(ctx: CanvasRenderingContext2D, image: HTMLImageElement, rect: Rect, adjustment = defaultAdjustment()) {
+  const { angle, scale, dx, dy } = adjustedTransform(image, rect, adjustment);
   ctx.save();
   ctx.beginPath();
   ctx.rect(rect.x, rect.y, rect.w, rect.h);
@@ -135,7 +156,10 @@ function drawCaption(ctx: CanvasRenderingContext2D, template: TemplateId, rect: 
   const single = template === 'polaroid-1';
   const centerX = rect.x + rect.w / 2;
   const maxWidth = rect.w - (single ? 36 : 24);
-  const firstY = rect.y + rect.h + (single ? (caption.line2Enabled ? 103 : 136) : (caption.line2Enabled ? 55 : 82));
+  const innerBottom = (single ? 1800 : 1200) - rect.y;
+  const captionSpace = innerBottom - (rect.y + rect.h);
+  const captionCenter = rect.y + rect.h + captionSpace / 2;
+  const firstY = captionCenter - (caption.line2Enabled ? (single ? 38 : 27) : 0);
   const drawLine = (text: string, font: string, size: number, y: number) => {
     if (!text.trim()) return;
     const option = captionFonts.find(item => item.value === font);
@@ -169,15 +193,6 @@ export async function renderLayout(files: (File | null)[], template: TemplateId,
   ctx.scale(outputScale, outputScale);
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, layout.width, layout.height);
-
-  if (template === 'polaroid-1') {
-    ctx.fillStyle = '#f2f1ec'; ctx.fillRect(margins.horizontal, margins.vertical, 1200 - 2 * margins.horizontal, 1800 - 2 * margins.vertical);
-    ctx.fillStyle = '#fff'; ctx.fillRect(margins.horizontal + 56, margins.vertical + 56, 1200 - 2 * margins.horizontal - 112, 1800 - 2 * margins.vertical - 112);
-  } else if (template === 'polaroid-2') {
-    ctx.fillStyle = '#f2f1ec'; ctx.fillRect(margins.horizontal, margins.vertical, 1800 - 2 * margins.horizontal, 1200 - 2 * margins.vertical);
-    const cardWidth = (1800 - 2 * (margins.horizontal + 48) - 36) / 2;
-    [margins.horizontal + 48, (1800 + 36) / 2].forEach(x => { ctx.fillStyle = '#fff'; ctx.fillRect(x, margins.vertical + 48, cardWidth, 1200 - 2 * margins.vertical - 96); });
-  }
 
   if (template === 'pip-horizontal' || template === 'pip-vertical') {
     const background = layout.slots[0];
