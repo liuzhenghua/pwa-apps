@@ -1,11 +1,14 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { readStored, saveStored } from '@pwa-apps/shared';
+import { readStored, saveStored, unlockTokenBox } from '@pwa-apps/shared';
 import { getRemote, getRemoteIndex, indexFingerprint, mergeNotes, putRemote, storageRepository, validateFolder, verifyRepository, type Note } from './sync';
 import './style.css';
 
 const key = 'pwa-apps:notes';
 const credentialsKey = 'pwa-apps:notes:github-credentials';
+const bundledTokenBox = import.meta.env.VITE_GITHUB_TOKEN_BOX || '';
+const hasBundledToken = Boolean(bundledTokenBox.trim());
+const bundledTokenMarker = 'encrypted-build';
 type Credentials = { folder: string; token: string; secret?: string };
 const baselineKey = (folder: string) => `pwa-apps:notes:sync:${storageRepository}:${folder}`;
 const indexKey = (folder: string) => `pwa-apps:notes:index:${storageRepository}:${folder}`;
@@ -19,7 +22,8 @@ function App() {
   const [openSwipe, setOpenSwipe] = useState<string | null>(null);
   const [showSync, setShowSync] = useState(false);
   const [folder, setFolder] = useState(() => readStored<Credentials>(credentialsKey, { folder: '', token: '' }).folder);
-  const [token, setToken] = useState(() => readStored<Credentials>(credentialsKey, { folder: '', token: '' }).token);
+  const [token, setToken] = useState(() => hasBundledToken ? '' : readStored<Credentials>(credentialsKey, { folder: '', token: '' }).token);
+  const [tokenPassphrase, setTokenPassphrase] = useState('');
   const [secret, setSecret] = useState(() => readStored<Credentials>(credentialsKey, { folder: '', token: '' }).secret ?? '');
   const [showTokenHelp, setShowTokenHelp] = useState(false);
   const [remote, setRemote] = useState<Awaited<ReturnType<typeof getRemote>> | null>(null);
@@ -28,6 +32,19 @@ function App() {
   const [syncMessage, setSyncMessage] = useState('');
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const swiped = useRef(false);
+  const tokenCache = useRef<{ passphrase: string; token: string } | null>(null);
+  useEffect(() => {
+    if (!hasBundledToken) return;
+    const saved = readStored<Credentials>(credentialsKey, { folder: '', token: '' });
+    if (saved.token && saved.token !== bundledTokenMarker) saveStored(credentialsKey, { ...saved, token: bundledTokenMarker });
+  }, []);
+  async function accessToken(): Promise<string> {
+    if (!hasBundledToken) return token.trim();
+    if (tokenCache.current?.passphrase === tokenPassphrase) return tokenCache.current.token;
+    const unlocked = await unlockTokenBox(bundledTokenBox, tokenPassphrase);
+    tokenCache.current = { passphrase: tokenPassphrase, token: unlocked };
+    return unlocked;
+  }
   const current = notes.find(note => note.id === selected);
   const savedBaseline = folder.trim() ? readStored<string | null>(baselineKey(folder.trim()), null) : null;
   const lastSyncAt = folder.trim() ? readStored<number | null>(lastSyncKey(folder.trim()), null) : null;
@@ -60,10 +77,11 @@ function App() {
   }
   function closeSync() { setShowSync(false); setRemote(null); }
   async function sendLocal(cloud: Awaited<ReturnType<typeof getRemote>>, items: Note[] = notes) {
-    const latest = await getRemoteIndex(folder, token.trim());
+    const auth = await accessToken();
+    const latest = await getRemoteIndex(folder, auth);
     if (indexFingerprint(latest) !== cloud.fingerprint) throw new Error('云端笔记已变化，请重新同步。');
-    await putRemote(folder, token.trim(), secret, items, cloud);
-    const updated = await getRemote(folder, token.trim(), secret);
+    await putRemote(folder, auth, secret, items, cloud);
+    const updated = await getRemote(folder, auth, secret);
     update(updated.notes);
     saveStored(baselineKey(validateFolder(folder)), snapshot(updated.notes));
     saveStored(indexKey(validateFolder(folder)), updated.fingerprint);
@@ -83,21 +101,23 @@ function App() {
     try {
       setSyncBusy(true); setSyncError(''); setSyncMessage(''); setRemote(null);
       const name = validateFolder(folder);
-      if (!token.trim()) throw new Error('请输入 GitHub Token。');
+      const auth = await accessToken();
+      if (!auth) throw new Error('请输入 GitHub Token。');
       if (!secret) throw new Error('请输入加密口令。');
-      await verifyRepository(token.trim());
-      const entries = await getRemoteIndex(name, token.trim());
+      await verifyRepository(auth);
+      const entries = await getRemoteIndex(name, auth);
       const localState = snapshot(notes);
       const previousConfig = readStored<Credentials>(credentialsKey, { folder: '', token: '' });
+      const tokenMarker = hasBundledToken ? bundledTokenMarker : auth;
       const previousState = readStored<string | null>(baselineKey(name), null);
       const previousIndex = readStored<string | null>(indexKey(name), null);
-      if (previousConfig.folder === name && previousConfig.token === token.trim() && previousConfig.secret === secret && previousState === localState && previousIndex === indexFingerprint(entries)) {
+      if (previousConfig.folder === name && previousConfig.token === tokenMarker && previousConfig.secret === secret && previousState === localState && previousIndex === indexFingerprint(entries)) {
         saveStored(lastSyncKey(name), Date.now());
         setSyncMessage('本地和云端都没有变化，无需同步。');
         return;
       }
-      const cloud = await getRemote(name, token.trim(), secret, entries);
-      saveStored(credentialsKey, { folder: name, token: token.trim(), secret });
+      const cloud = await getRemote(name, auth, secret, entries);
+      saveStored(credentialsKey, { folder: name, token: tokenMarker, secret });
       const cloudState = snapshot(cloud.notes);
       const baseline = readStored<string | null>(baselineKey(name), null);
       if (localState === cloudState) {
@@ -139,7 +159,8 @@ function App() {
   }
   function clearCredentials() {
     localStorage.removeItem(credentialsKey);
-    setFolder(''); setToken(''); setSecret(''); setRemote(null); setSyncMessage('已清除这台设备保存的同步配置。');
+    tokenCache.current = null;
+    setFolder(''); setToken(''); setTokenPassphrase(''); setSecret(''); setRemote(null); setSyncMessage('已清除这台设备保存的同步配置。');
   }
   function endSwipe(event: React.TouchEvent, id: string) {
     if (!touchStart.current) return;
@@ -175,12 +196,14 @@ function App() {
       <div className="dialog-heading"><div><span className="dialog-kicker">GITHUB 同步</span><h2 id="sync-title">同步笔记</h2></div><button className="close-dialog" onClick={closeSync} aria-label="关闭">×</button></div>
       <p className="repo-name">私有仓库：{storageRepository}</p>
       <label className="field">名字 <span>用作仓库中的文件夹</span><input value={folder} onChange={event => { setFolder(event.target.value); setRemote(null); }} placeholder="例如 liu" autoComplete="username" /></label>
-      <div className="token-label"><strong>GitHub Token</strong><button className="help-button" type="button" onClick={() => setShowTokenHelp(value => !value)} aria-label="如何获取 GitHub Token" aria-expanded={showTokenHelp}>?</button></div>
-      {showTokenHelp && <div className="token-help"><p>在 GitHub 创建 Fine-grained personal access token，仓库权限只选 <strong>{storageRepository}</strong>，将 <strong>Contents</strong> 设为 <strong>Read and write</strong>。创建后复制 Token 粘贴到下方。</p><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">前往 GitHub 创建 Token ↗</a></div>}
-      <label className="field token-field"><span>首次配置后会保存在这台设备上</span><input type="password" value={token} onChange={event => { setToken(event.target.value); setRemote(null); }} placeholder="Fine-grained personal access token" autoComplete="off" /></label>
-      <label className="field">加密口令 <span>首次验证后保存在这台设备；丢失后无法恢复云端笔记。</span><input type="password" value={secret} onChange={event => { setSecret(event.target.value); setRemote(null); }} placeholder="输入你的加密字符串" autoComplete="off" /></label>
-      {(folder || token || secret) && <button className="clear-credentials" onClick={clearCredentials} type="button">清除已保存的配置</button>}
-      <p className="credential-notice">Token 和加密口令会存于当前浏览器；请勿在共用设备上配置。</p>
+      {hasBundledToken ? <label className="field">云端访问口令 <span>用于解锁 GitHub 访问凭证；仅在当前页面暂存。</span><input type="password" value={tokenPassphrase} onChange={event => { setTokenPassphrase(event.target.value); tokenCache.current = null; setRemote(null); }} placeholder="输入云端访问口令" autoComplete="off" /></label> : <>
+        <div className="token-label"><strong>GitHub Token</strong><button className="help-button" type="button" onClick={() => setShowTokenHelp(value => !value)} aria-label="如何获取 GitHub Token" aria-expanded={showTokenHelp}>?</button></div>
+        {showTokenHelp && <div className="token-help"><p>在 GitHub 创建 Fine-grained personal access token，仓库权限只选 <strong>{storageRepository}</strong>，将 <strong>Contents</strong> 设为 <strong>Read and write</strong>。创建后复制 Token 粘贴到下方。</p><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">前往 GitHub 创建 Token ↗</a></div>}
+        <label className="field token-field"><span>首次配置后会保存在这台设备上</span><input type="password" value={token} onChange={event => { setToken(event.target.value); setRemote(null); }} placeholder="Fine-grained personal access token" autoComplete="off" /></label>
+      </>}
+      <label className="field">数据加密口令 <span>用于加密和解密笔记；保存在这台设备，丢失后无法恢复云端笔记。</span><input type="password" value={secret} onChange={event => { setSecret(event.target.value); setRemote(null); }} placeholder="输入数据加密口令" autoComplete="off" /></label>
+      {(folder || token || tokenPassphrase || secret) && <button className="clear-credentials" onClick={clearCredentials} type="button">清除已保存的配置</button>}
+      <p className="credential-notice">{hasBundledToken ? 'Token 以密文打包；云端访问口令仅在当前页面暂存。' : 'Token 保存在当前浏览器。'}数据加密口令会保存在当前浏览器；请勿在共用设备上配置。</p>
       <button className="read-cloud" onClick={startSync} disabled={syncBusy}>{syncBusy ? '同步中…' : '开始同步'}</button>
       {syncError && <p className="sync-error" role="alert">{syncError}</p>}{syncMessage && <p className="sync-success" role="status">{syncMessage}</p>}
       {remote && <div className="sync-preview"><h3>同步预览</h3><div className="sync-counts"><span>本地 <strong>{notes.length}</strong> 条</span><span>云端 <strong>{remote.notes.length}</strong> 条</span></div><p>存在同一时间修改的笔记，或编辑与删除冲突。请选择要保留的一边，另一边将被覆盖。</p>{differences.length ? <ul className="diff-list">{differences.map((item, index) => <li key={`${item.kind}-${index}`}><span>{item.label}</span><em>{item.kind}</em></li>)}</ul> : <p className="same-notes">两边笔记内容相同。</p>}<div className="sync-choices"><button onClick={upload} disabled={syncBusy}>本地 → 云端</button><button onClick={download} disabled={syncBusy}>云端 → 本地</button></div></div>}

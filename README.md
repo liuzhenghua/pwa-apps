@@ -1,108 +1,74 @@
 # pwa-apps
 
-一个仓库管理多个面向手机端的 React + Vite PWA。每个应用独立开发、独立生成 PWA manifest 和 Service Worker，构建时汇总到同一个 `dist/`，由一次 GitHub Pages 部署发布。
+一个仓库管理多个面向手机的 React + Vite PWA。各应用独立开发，构建后汇总到 `dist/`，由一次 GitHub Pages 工作流发布。
 
-第一次接触 PWA？参见 [PWA 是什么，以及本项目如何使用它](docs/pwa.md)。
+| 应用 | 功能 |
+| --- | --- |
+| [笔记](apps/notes/README.md) | 本地笔记、搜索、加密 GitHub 同步 |
+| [照片布局](apps/photo-layout/README.md) | 6 寸照片排版与导出 |
+| [资产簿](apps/assets/README.md) | 余额历史、净资产趋势、盘点与加密备份 |
 
-目前包含：
+默认入口：<https://liuzhenghua.github.io/pwa-apps/>。PWA 的安装和离线行为见 [PWA 说明](docs/pwa.md)。
 
-| 应用 | 地址 | 功能 |
-| --- | --- | --- |
-| 笔记 | `/pwa-apps/notes/` | 搜索、编辑、左滑删除、本地保存、加密云端同步 |
-| 照片布局 | `/pwa-apps/photo-layout/` | 首页选 6 寸模板，进入后按位置添加照片、导出 JPG 或系统分享；刷新后清空 |
-| 资产簿 | `/pwa-apps/assets/` | 余额历史、净资产趋势、资产盘点及加密备份 |
+## 本地启动
 
-照片布局参考了 [原项目的 6 寸排版](https://github.com/liuzhenghua/photo-layout)。七种模板均可选择导出画质；常规拼图和拍立得可调边距，拍立得可为每张照片单独编辑底部文字。横版和竖版画中画保留了倾斜相框、添加和移除相框、拖动位置、调整大小与角度及照片裁剪。
-
-## 项目结构
-
-```text
-pwa-apps/
-├── apps/
-│   ├── notes/             # 笔记应用
-│   └── photo-layout/      # 照片布局应用
-├── packages/shared/       # 共用代码
-├── scripts/build.mjs      # 汇总两个应用的构建结果
-├── .github/workflows/     # Pages 部署工作流
-└── dist/                  # 构建产物，不提交到 Git
-```
-
-## 本地开发与发布
-
-需要 Node.js 22 和 npm。首次安装依赖后，可分别启动应用：
+需要 Node.js 22 和 npm。在仓库根目录执行：
 
 ```sh
 npm ci
 npm run dev:notes
 npm run dev:photo-layout
+npm run dev:assets
 ```
 
-检查和构建：
+三个 `dev` 命令分别启动对应应用；运行一个即可。检查与构建：
 
 ```sh
 npm run typecheck
 npm run build
 ```
 
-`dist/index.html` 是应用入口；`dist/notes/`、`dist/photo-layout/` 各有独立的 `index.html`、`manifest.webmanifest` 和 `sw.js`。推送到 `main` 后，GitHub Actions 会一次发布整个 `dist/`。首次使用时，在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。
+构建脚本将首页及各应用输出到 `dist/`。每个应用都有自己的 PWA manifest 和 Service Worker。
 
-默认站点地址是 `https://liuzhenghua.github.io/pwa-apps/`。如果 GitHub 仓库改名，需要同步修改工作流的 `PWA_REPO` 和构建脚本中的默认仓库名。
+## 部署与通用配置
 
-## 笔记数据与同步
+推送到 `main` 后，[GitHub Actions 工作流](.github/workflows/deploy.yml)会构建并发布整个 `dist/`。首次部署时，在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。
 
-笔记首先保存在当前浏览器的 `localStorage`。点击笔记页右上角的云端同步按钮，再点“开始同步”，应用才会访问 GitHub；编辑时不会自动上传。
+- 默认站点路径为 `/pwa-apps/`。仓库改名时，同步修改工作流里的 `PWA_REPO` 和 [构建脚本](scripts/build.mjs)中的默认值。
+- 笔记与资产簿的云端数据使用私有仓库 `liuzhenghua/pwa-apps-data`，各自存放在不同目录。先创建该仓库；通用的加密 Token 配置见下文；各应用的同步方式见[笔记说明](apps/notes/README.md#同步规则)和[资产簿说明](apps/assets/README.md#配置-github-访问)。
+- 本地 Vite 配置放在对应应用目录的 `.env.local`；此类文件已被 Git 忽略。
 
-云端数据仓库固定为 **`liuzhenghua/pwa-apps-data`**，需要先在 GitHub 创建为 **Private**。它可容纳以后其他应用的数据；笔记使用自己的顶层目录：
+## 云端数据与加密 Token 配置
 
-```text
-pwa-apps-data/
-└── notes/
-    └── <名字>/
-        ├── _crypto.json
-        ├── <笔记ID-1>.json
-        └── <笔记ID-2>.json
+笔记和资产簿都可以把加密数据同步到私有仓库 `liuzhenghua/pwa-apps-data`，需要一个仅对该仓库有 **Contents: Read and write** 权限的 [Fine-grained Token](https://github.com/settings/personal-access-tokens/new)。两款应用共用一份**加密后的 Token**，但各自的数据目录和数据加密口令独立。
+
+云端访问口令用于解锁 Token，可以自行设置。构建产物中的密文是公开的，`123456` 等短口令可以被离线反复猜测；使用短口令等于接受 Token 可能被解出、仓库文件可能被读写或删除的风险。首次生成配置，在仓库根目录执行：
+
+```sh
+cat > .env.token.local <<'ENV'
+DATA_GITHUB_TOKEN=你的GitHub_Token
+DATA_TOKEN_PASSPHRASE=你的独立长口令
+ENV
+node --env-file=.env.token.local scripts/encrypt-github-token.mjs
+rm .env.token.local
 ```
 
-“名字”决定文件夹，支持字母、数字、下划线和连字符。每条笔记单独存一个加密文件，文件名是随机笔记 ID，不包含标题。
+脚本会把同一份 `VITE_GITHUB_TOKEN_BOX` 密文写入 `apps/notes/.env.local` 和 `apps/assets/.env.local`，供本地 Vite 使用。把其中等号后的值配置为本仓库的 GitHub Actions Secret **`DATA_GITHUB_TOKEN_BOX`**；[部署工作流](.github/workflows/deploy.yml)会在构建两个应用时注入密文。修改本地 `.env.local` 后重启开发服务器。所有 `.local` 文件均被 Git 忽略。
 
-### 配置 GitHub 访问
+构建产物中的密文对访问者可见；云端访问口令越容易猜，Token 被解出的风险越高。解锁口令只在当前页面内存中暂存，不写入浏览器存储。忘记口令或更换 Token 时，重新生成密文、更新 CI Secret 并重新部署。未配置密文时，两款应用仍保留手动输入 Token 的方式。
 
-1. 创建私有仓库 `liuzhenghua/pwa-apps-data`。
-2. [创建 Fine-grained personal access token](https://github.com/settings/personal-access-tokens/new)，只选择这个仓库，授予 **Contents: Read and write**。同步弹窗中 Token 旁的问号也提供入口。
-3. 在同步弹窗填写名字、Token 和加密口令，点击“开始同步”。
+注意：Token 的写权限覆盖所选仓库，而不只覆盖某个应用目录。加密数据内容仍由各应用自己的口令保护，但拿到 Token 的人能删除或覆盖密文文件。
 
-首次成功读取仓库后，三个值保存在当前设备的 `localStorage`，以后自动填入。弹窗中的“清除已保存的配置”会删除它们。加密口令要足够长且独立；丢失后无法解密云端笔记。
+## 项目目录
 
-### 同步方向与性能
+```text
+apps/                 # 各应用源码与独立 README
+packages/shared/      # 共用代码
+scripts/build.mjs      # 汇总生产构建
+site/                  # 站点首页
+.github/workflows/     # Pages 部署工作流
+docs/                  # 跨应用说明
+dist/                  # 构建产物，不提交到 Git
+```
 
-应用保存上次成功同步时的本地笔记快照与云端文件 SHA 列表。每次同步先读 GitHub 目录：
-
-- 两边都没有变化：直接结束，不下载或解密每条笔记。
-- 仅一边有变化：自动向另一边同步。
-- 两边都有变化：按笔记 ID 合并；同一笔记选择 `updated` 时间较新的版本。删除依据上次同步快照判断。
-- 同一时间出现不同内容，或一边编辑而另一边删除：显示差异，让用户选择保留本地或云端，并在覆盖前确认。
-
-更新时间取自设备时钟，因此各设备时间需要准确。发生变化时，目前仍需读取云端笔记文件；GitHub Contents 目录接口接近 1000 个文件时，应用会停止同步并提示升级方案。每条云端写入通过 GitHub Contents API 单独提交，批量同步不是原子操作；中途失败可能只完成部分写入，重新同步会再次比较状态。
-
-## 云端加密如何工作
-
-加密与解密在浏览器内通过 Web Crypto 完成。应用不会把明文笔记或加密口令发送到 GitHub；GitHub 收到的是加密配置和笔记密文。
-
-1. 每个“名字”首次上传时生成 **16 字节随机 salt**。口令与 salt 经 **PBKDF2-HMAC-SHA-256（600,000 次迭代）** 派生出 **256 位 AES 密钥**。同一文件夹的笔记共用这个密钥；每次读取一批笔记时只需派生一次，而不是每条笔记各派生一次。
-2. `_crypto.json` 保存版本、KDF 参数、salt，以及用该密钥加密的固定校验文本。`checkIv` 是这段校验密文的 IV，用于在下载笔记前检查口令是否正确。它不包含口令或 AES 密钥。
-3. 每次写入一条笔记，都生成新的 **12 字节随机 IV**，用 **AES-256-GCM** 加密包含 ID、标题、正文和更新时间的 JSON。该笔记文件只保存 `version`、`iv` 和 `ciphertext`；GCM 认证标签包含在密文中。
-4. 解密时先读取 `_crypto.json` 的 salt，用输入的口令重新派生密钥并验证校验密文；再用每条笔记文件自己的 IV 解密。salt 和 IV 不需要保密，但必须和密文一起保留。
-
-云端仍可看见文件夹名字、随机笔记 ID、文件数量、文件大小和 Git 提交时间。当前浏览器中的笔记明文、Token 与加密口令保存在本地 `localStorage`；云端加密保护的是 GitHub 仓库里的笔记内容。
-
-实现代码见 `apps/notes/src/crypto.ts`（加密）、`apps/notes/src/sync.ts`（GitHub 读写与合并）和 `apps/notes/src/main.tsx`（界面与同步流程）。
-
-## 资产簿
-
-`/pwa-apps/assets/` 是独立的离线 PWA。账户、余额历史和盘点记录保存在当前浏览器的 IndexedDB。历史趋势按目标日期之前各账户最近的一条余额推算；缺少历史记录时，历史对比不会显示增长结论。金额目前统一为人民币，负债余额按正数录入。
-
-在“设置 → 数据同步与备份”可导出 AES-256-GCM 加密 JSON 文件、导入文件，或把加密数据保存到私有仓库 `liuzhenghua/pwa-apps-data` 的 `assets/<名字>/portfolio.json`。GitHub Token 需要该仓库的 Contents 读写权限。点击“同步数据”会读取并解密云端文件，以整份数据的最后修改时间决定方向：本地较新则加密上传，云端较新则更新本地；相同时间但内容不同会停止同步。上传时 GitHub 的文件 SHA 还会防止覆盖同步过程中的云端更新。Token 和加密口令保存在当前浏览器的本地存储中，供下次自动填入；可在弹窗中清除已保存的口令。共用设备上不建议保存，口令丢失后无法解密备份。
-
-资产簿云端备份按“云端名字”隔离，路径为 `assets/<名字>/portfolio.json`，与笔记应用的文件夹命名方式类似。名字只支持字母、数字、下划线和连字符。旧版本的 `assets/portfolio.json` 可在备份弹窗通过“读取旧版固定路径备份”恢复；新备份不会再写入该旧路径。名字仅区分 GitHub 上的文件夹，不构成访问控制；仓库应保持 Private，文件内容仍由口令加密。目前本机 IndexedDB 是一份数据，不按名字切换本地档案。
-
-同步是手动触发的单次操作；新增账户或修改余额后不会在后台自动上传。修改时间使用设备时钟，因此多设备应保持时间准确。目前按整份数据选择较新的一侧，不会逐账户合并两台设备各自的修改。
+加密算法与数据边界分别见[笔记的云端加密原理](apps/notes/README.md#云端加密原理)和[资产簿的加密方案](apps/assets/README.md#加密方案)。

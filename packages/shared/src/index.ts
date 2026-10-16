@@ -10,3 +10,4 @@ export function readStored<T>(key: string, fallback: T): T {
 export function saveStored<T>(key: string, value: T): void {
   localStorage.setItem(key, JSON.stringify(value));
 }
+export { unlockTokenBox } from './token-box.ts';
