@@ -68,15 +68,6 @@ button:disabled {
   font-weight: 800;
   letter-spacing: 0.12em;
 }
-.avatar {
-  width: 36px;
-  height: 36px;
-  border: 0;
-  border-radius: 50%;
-  background: #edf4ef;
-  color: #315749;
-  font-size: 19px;
-}
 main {
   padding: 25px 20px 40px;
 }
@@ -714,6 +705,64 @@ main {
 .settings-card .primary {
   margin-top: 5px;
 }
+.settings-actions {
+  display: flex;
+  gap: 9px;
+  margin-top: 5px;
+}
+.settings-actions button {
+  min-height: 42px;
+  margin: 0;
+}
+.settings-card .settings-actions .primary {
+  margin: 0;
+}
+.settings-actions button:not(.primary) {
+  padding: 11px 14px;
+  border: 1px solid #d7e2dc;
+  border-radius: 11px;
+  background: #fff;
+  color: #526f61;
+  font-size: 13px;
+  font-weight: 650;
+}
+.sync-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 10px;
+  padding: 11px 12px;
+  border: 1px solid #dce8e1;
+  border-radius: 8px;
+  background: #f6faf7;
+}
+.sync-summary > span {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4d8c72;
+}
+.sync-summary.pending {
+  border-color: #eadfcf;
+  background: #fdf9f3;
+}
+.sync-summary.pending > span {
+  background: #b47b3f;
+}
+.sync-summary strong,
+.sync-summary small {
+  display: block;
+}
+.sync-summary strong {
+  color: #354d42;
+  font-size: 13px;
+}
+.sync-summary small {
+  margin-top: 3px;
+  color: #87968e;
+  font-size: 11px;
+}
 .shade {
   position: fixed;
   inset: 0;
@@ -819,11 +868,6 @@ main {
   border-radius: 8px;
   font-size: 11px;
 }
-.divider {
-  height: 1px;
-  margin: 20px 0;
-  background: #e8eee7;
-}
 .file-label {
   display: block;
   padding: 13px;
@@ -868,16 +912,6 @@ main {
     border-radius: 22px;
     max-height: 88dvh;
   }
-}
-.legacy-link {
-  display: block;
-  margin: 14px auto 0;
-  padding: 4px;
-  border: 0;
-  background: none;
-  color: #718c7b;
-  text-decoration: underline;
-  font-size: 11px;
 }
 .clear-secret {
   display: block;
@@ -936,34 +970,28 @@ main {
   z-index: 6;
 }
 
-.accounts-head {
-  gap: 10px;
+.page-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  margin-bottom: 15px;
+  color: #84938c;
+  font-size: 13px;
+  font-weight: 650;
 }
-.accounts-head > div:first-child {
-  min-width: 0;
-  flex: 1;
+.page-toolbar.compact {
+  min-height: 0;
 }
-.accounts-head .action-row {
-  flex: none;
-  margin-top: 0;
-  gap: 8px;
-}
-.accounts-head .action-row > * {
-  flex: none;
-  white-space: nowrap;
-  padding: 10px 12px;
-}
-.accounts-head .primary {
+.page-toolbar .primary {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  padding: 8px 11px;
 }
-.accounts-head .primary svg {
-  width: 17px;
-  height: 17px;
-}
-.accounts-head h1 {
-  white-space: nowrap;
+.page-toolbar .primary svg {
+  width: 16px;
+  height: 16px;
 }
 .empty-state {
   padding: 32px 10px;
@@ -977,16 +1005,6 @@ main {
 .empty-state p {
   margin: 0;
 }
-@media (max-width: 390px) {
-  .accounts-head h1 {
-    font-size: 25px;
-  }
-  .accounts-head .action-row > * {
-    font-size: 12px;
-    padding: 9px 10px;
-  }
-}
-
 .institution-heading {
   padding: 15px 0 5px;
   color: #647f6c;
@@ -1508,10 +1526,6 @@ main {
 }
 .brand-user {
   color: #89939e;
-}
-.avatar {
-  background: #f0f3f6;
-  color: #526478;
 }
 .bottom {
   background: #fff;

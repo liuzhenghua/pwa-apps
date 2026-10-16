@@ -49,6 +49,20 @@ const categoryPresets = {
   debt: ["房贷", "信用卡", "消费贷", "其他负债"],
 } as const;
 const customCategoryValue = "__custom__";
+type SyncRecord = { folder: string; syncedAt: number; dataUpdatedAt: number };
+const readSyncRecord = (): SyncRecord | null => {
+  try {
+    const value = JSON.parse(localStorage.getItem("assets:last-sync") || "null");
+    return value &&
+      typeof value.folder === "string" &&
+      Number.isFinite(value.syncedAt) &&
+      Number.isFinite(value.dataUpdatedAt)
+      ? value
+      : null;
+  } catch {
+    return null;
+  }
+};
 const liquidityLabels = {
   liquid: "流动资金",
   locked: "期限内不可用",
@@ -108,7 +122,13 @@ function App() {
   const [loaded, setLoaded] = useState(false);
   const [page, setPage] = useState<Page>("overview");
   const [modal, setModal] = useState<
-    "account" | "balance" | "audit" | "backup" | "detail" | null
+    | "account"
+    | "balance"
+    | "audit"
+    | "sync"
+    | "transfer"
+    | "detail"
+    | null
   >(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -146,17 +166,11 @@ function App() {
     [folder, setFolder] = useState(
       () => localStorage.getItem("assets:folder") || "",
     );
-  const [loadedFolder, setLoadedFolder] = useState<string | null | undefined>(
-    undefined,
-  );
-  const [cloudSha, setCloudSha] = useState<string | null | undefined>(
-      undefined,
-    ),
-    [cloudData, setCloudData] = useState<Data | null>(null);
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
     [syncStage, setSyncStage] = useState(""),
     [syncFailed, setSyncFailed] = useState(false);
+  const [lastSync, setLastSync] = useState<SyncRecord | null>(readSyncRecord);
   const [audit, setAudit] = useState<
     Record<string, "checked" | "skipped" | "change">
   >({});
@@ -210,6 +224,15 @@ function App() {
     await save(next);
     dataRef.current = next;
     setData(next);
+  }
+  function markSynced(folderName: string, syncedData: Data) {
+    const record = {
+      folder: folderName,
+      syncedAt: Date.now(),
+      dataUpdatedAt: dataModifiedAt(syncedData),
+    };
+    localStorage.setItem("assets:last-sync", JSON.stringify(record));
+    setLastSync(record);
   }
   const active = data.accounts.filter((a) => !a.archived);
   const institutionGroups = Array.from(new Set(active.map((a) => a.name))).sort(
@@ -516,9 +539,6 @@ function App() {
       setMessage("");
       setSyncFailed(false);
       setSyncStage("正在检查 GitHub 仓库…");
-      setLoadedFolder(undefined);
-      setCloudData(null);
-      setCloudSha(undefined);
       if (!loaded) throw Error("本地数据尚未加载");
       if (!secret) throw Error("请输入数据加密口令");
       const accessToken = hasBundledToken
@@ -540,6 +560,7 @@ function App() {
       localStorage.setItem("assets:folder", target);
       if (!remote.payload) {
         if (dataModifiedAt(local) === 0) {
+          markSynced(target, local);
           setMessage("本地和云端都没有数据");
           return;
         }
@@ -552,10 +573,12 @@ function App() {
           await encrypt(local, secret),
           null,
         );
+        markSynced(target, local);
         setMessage("本地数据较新，已加密上传到 GitHub");
         return;
       }
       if (sameData(local, cloud)) {
+        markSynced(target, local);
         setMessage("本地与云端内容相同，无需同步");
         return;
       }
@@ -571,6 +594,7 @@ function App() {
           await encrypt(local, secret),
           remote.sha,
         );
+        markSynced(target, local);
         setMessage("本地数据较新，已加密上传到 GitHub");
         return;
       }
@@ -579,6 +603,7 @@ function App() {
           throw Error("同步期间本地数据发生变化，请重试");
         setSyncStage("正在保存云端数据到本机…");
         await replaceLocal(cloud);
+        markSynced(target, cloud);
         setMessage("云端数据较新，已更新本地");
         return;
       }
@@ -592,41 +617,6 @@ function App() {
       setBusy(false);
       setSyncStage("");
     }
-  }
-  async function readLegacy() {
-    try {
-      setBusy(true);
-      setMessage("");
-      setCloudSha(undefined);
-      setCloudData(null);
-      setLoadedFolder(undefined);
-      if (!secret) throw Error("请输入数据加密口令");
-      const accessToken = hasBundledToken
-        ? await unlockBundledToken(tokenPassphrase)
-        : token.trim();
-      if (!accessToken) throw Error("请输入 GitHub Token");
-      await checkRepo(accessToken);
-      const remote = await readCloud(accessToken, null);
-      if (!remote.payload) throw Error("旧路径没有备份文件");
-      setCloudSha(remote.sha);
-      setLoadedFolder(null);
-      setCloudData(await decrypt(remote.payload, secret));
-      setMessage("旧路径备份已读取。可恢复到本地，然后以新名字上传。");
-    } catch (e) {
-      setMessage(String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function restore() {
-    if (
-      !cloudData ||
-      !confirm("用旧路径备份替换当前全部本地数据？请先导出一份本地备份。")
-    )
-      return;
-    await commit(cloudData);
-    setMessage("旧路径备份已恢复到本地；同步新名字时会上传此数据");
-    setModal(null);
   }
   const distributionAccounts = active.filter(
     (a) =>
@@ -649,6 +639,26 @@ function App() {
   const categories = distributionValues;
   const debtRatio =
     overviewAssets > 0 ? (current.debts / overviewAssets) * 100 : null;
+  const currentFolder = folder.trim();
+  const currentSync = lastSync?.folder === currentFolder ? lastSync : null;
+  const hasLocalChanges =
+    dataModifiedAt(data) > (currentSync?.dataUpdatedAt ?? 0);
+  const syncTimeLabel = currentSync
+    ? new Intl.DateTimeFormat("zh-CN", {
+        month: "numeric",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(currentSync.syncedAt)
+    : "尚无同步记录";
+  const syncConfigured =
+    /^[\w-]{1,60}$/.test(currentFolder) &&
+    Boolean(secret) &&
+    Boolean(hasBundledToken ? tokenPassphrase : token.trim());
+  const openSyncConfig = () => {
+    setMessage("");
+    setModal("sync");
+  };
 
   return (
     <div className="app">
@@ -675,13 +685,6 @@ function App() {
             </div>
           </div>
         </div>
-        <button
-          className="avatar"
-          onClick={() => setPage("settings")}
-          aria-label="设置"
-        >
-          ⚙
-        </button>
       </header>
       <main>
         {!loaded ? (
@@ -842,27 +845,22 @@ function App() {
             )}
             {page === "accounts" && (
               <>
-                <div className="page-head accounts-head">
-                  <div>
-                    <small>账户管理</small>
-                    <h1>全部账户</h1>
-                  </div>
-                  <div className="action-row">
-                    <button
-                      className="primary small"
-                      onClick={() => {
-                        setEditingId(null);
-                        setName("");
-                        setKind("asset");
-                        setCategory("银行存款");
-                        setLiquidity("liquid");
-                        setModal("account");
-                      }}
-                    >
-                      <Plus aria-hidden="true" />
-                      新增
-                    </button>
-                  </div>
+                <div className="page-toolbar">
+                  <span>全部账户</span>
+                  <button
+                    className="primary small"
+                    onClick={() => {
+                      setEditingId(null);
+                      setName("");
+                      setKind("asset");
+                      setCategory("银行存款");
+                      setLiquidity("liquid");
+                      setModal("account");
+                    }}
+                  >
+                    <Plus aria-hidden="true" />
+                    新增
+                  </button>
                 </div>
                 {active.length > 0 && (
                   <div className="summary-strip">
@@ -987,11 +985,8 @@ function App() {
             )}
             {page === "trends" && (
               <>
-                <div className="page-head">
-                  <div>
-                    <small>按月回顾财产变化</small>
-                    <h1>月度报告</h1>
-                  </div>
+                <div className="page-toolbar">
+                  <span>月度报告</span>
                   <label className="trend-property-toggle report-scope-toggle">
                     <input
                       type="checkbox"
@@ -1318,30 +1313,49 @@ function App() {
             )}
             {page === "settings" && (
               <>
-                <div className="page-head">
-                  <div>
-                    <small>数据与隐私</small>
-                    <h1>设置</h1>
-                  </div>
+                <div className="page-toolbar compact">
+                  <span>设置</span>
                 </div>
                 <section className="card settings-card">
                   <h2>数据同步与备份</h2>
+                  <div
+                    className={`sync-summary ${hasLocalChanges ? "pending" : "synced"}`}
+                  >
+                    <span aria-hidden="true" />
+                    <div>
+                      <strong>
+                        {hasLocalChanges
+                          ? "本地有更新待同步"
+                          : currentSync
+                            ? "已与云端同步"
+                            : "尚未产生本地数据"}
+                      </strong>
+                      <small>
+                        {currentSync ? `上次同步 ${syncTimeLabel}` : syncTimeLabel}
+                      </small>
+                    </div>
+                  </div>
                   <p>
                     点击同步后自动比较本地和 GitHub
-                    的修改时间，保留较新的一份。也可导出加密文件。
+                    的修改时间，保留较新的一份。
                   </p>
-                  <button
-                    className="primary"
-                    onClick={() => {
-                      setMessage("");
-                      setCloudSha(undefined);
-                      setCloudData(null);
-                      setLoadedFolder(undefined);
-                      setModal("backup");
-                    }}
-                  >
-                    管理备份 →
-                  </button>
+                  <div className="settings-actions">
+                    <button
+                      className="primary"
+                      disabled={busy || !loaded}
+                      onClick={() =>
+                        syncConfigured ? void syncGithub() : openSyncConfig()
+                      }
+                    >
+                      {busy ? "同步中…" : "立即同步"}
+                    </button>
+                    <button onClick={openSyncConfig}>同步配置</button>
+                  </div>
+                </section>
+                <section className="card settings-card">
+                  <h2>数据导入与导出</h2>
+                  <p>导出加密文件留存，或用备份文件替换本机数据。</p>
+                  <button onClick={() => setModal("transfer")}>管理数据 →</button>
                 </section>
                 <section className="card settings-card">
                   <h2>数据概况</h2>
@@ -1405,7 +1419,8 @@ function App() {
                         ? "更新余额"
                         : "录入首次余额",
                     audit: "资产盘点",
-                    backup: "数据同步与备份",
+                    sync: "同步配置",
+                    transfer: "数据导入与导出",
                     detail: selectedAccount
                       ? accountTitle(selectedAccount)
                       : "账户详情",
@@ -1678,9 +1693,10 @@ function App() {
                 </button>
               </>
             )}
-            {modal === "backup" && (
+            {modal === "sync" && (
               <>
                 <p className="subtle">
+                  {!syncConfigured && "请先补齐同步配置。"}
                   私有仓库：{repository} / assets/{folder.trim() || "<名字>"}
                   /portfolio.json。不同名字使用不同云端文件夹；本机数据仍是一份。
                 </p>
@@ -1691,9 +1707,6 @@ function App() {
                     onChange={(e) => {
                       setFolder(e.target.value);
                       localStorage.setItem("assets:folder", e.target.value);
-                      setCloudSha(undefined);
-                      setLoadedFolder(undefined);
-                      setCloudData(null);
                     }}
                     placeholder="字母、数字、下划线或连字符"
                     autoComplete="off"
@@ -1725,12 +1738,7 @@ function App() {
                       type="password"
                       autoComplete="off"
                       value={token}
-                      onChange={(e) => {
-                        setToken(e.target.value);
-                        setCloudSha(undefined);
-                        setLoadedFolder(undefined);
-                        setCloudData(null);
-                      }}
+                      onChange={(e) => setToken(e.target.value)}
                       placeholder="Contents: Read and write"
                     />
                   </label>
@@ -1746,9 +1754,6 @@ function App() {
                       if (e.target.value)
                         localStorage.setItem("assets:secret", e.target.value);
                       else localStorage.removeItem("assets:secret");
-                      setCloudSha(undefined);
-                      setLoadedFolder(undefined);
-                      setCloudData(null);
                     }}
                     placeholder="用于加密和解密备份数据"
                   />
@@ -1761,9 +1766,6 @@ function App() {
                     localStorage.removeItem("assets:cloud-passphrase");
                     setSecret("");
                     setTokenPassphrase("");
-                    setCloudSha(undefined);
-                    setLoadedFolder(undefined);
-                    setCloudData(null);
                     setMessage("已清除此浏览器保存的两个口令");
                   }}
                 >
@@ -1774,7 +1776,7 @@ function App() {
                   disabled={busy || !loaded}
                   onClick={syncGithub}
                 >
-                  {busy ? "同步中…" : "同步数据"}
+                  {busy ? "同步中…" : "保存并同步"}
                 </button>
                 {(busy || message) && (
                   <p
@@ -1788,23 +1790,25 @@ function App() {
                 <p className="hint">
                   每次点击会自动读取云端并比较整份数据的修改时间；较新的一份会覆盖较旧的一份。同时间内容不同会停止同步。
                 </p>
-                <button
-                  className="legacy-link"
-                  disabled={busy}
-                  onClick={readLegacy}
-                >
-                  读取旧版固定路径备份
-                </button>
-                {loadedFolder === null && cloudData && (
-                  <button
-                    className="outline full"
-                    disabled={busy}
-                    onClick={restore}
-                  >
-                    恢复旧版备份到本地
-                  </button>
-                )}
-                <div className="divider" />
+              </>
+            )}
+            {modal === "transfer" && (
+              <>
+                <label>
+                  数据加密口令
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={secret}
+                    onChange={(e) => {
+                      setSecret(e.target.value);
+                      if (e.target.value)
+                        localStorage.setItem("assets:secret", e.target.value);
+                      else localStorage.removeItem("assets:secret");
+                    }}
+                    placeholder="用于加密和解密备份数据"
+                  />
+                </label>
                 <button
                   className="outline full"
                   onClick={async () => {
@@ -1833,14 +1837,11 @@ function App() {
                   />
                 </label>
                 <p className="hint">
-                  {hasBundledToken
-                    ? "GitHub Token 以密文打包；云端访问口令保存在此浏览器。"
-                    : "GitHub Token 保存在此浏览器中。"}
-                  数据加密口令保存在此浏览器；请勿在共用设备上使用。备份口令丢失后无法解密数据。
+                  文件使用上面的口令加密或解密。导入会替换当前全部本地数据。
                 </p>
               </>
             )}
-            {message && modal !== "backup" && (
+            {message && modal !== "sync" && (
               <p className="toast-inline">{message}</p>
             )}
           </section>
