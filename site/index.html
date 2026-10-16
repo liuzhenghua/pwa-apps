@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f7f4">
+  <meta name="description" content="打开笔记和照片布局，随时记录与创作。">
+  <title>我的应用 · PWA Apps</title>
+  <style>
+    :root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:#1d2a22;background:#f6f7f4;font-synthesis:none}
+    *{box-sizing:border-box}
+    body{margin:0;min-width:320px}
+    a{color:inherit;text-decoration:none}
+    .shell{width:min(1120px,100% - 48px);margin:0 auto}
+    .topbar{height:82px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e4e9e2}
+    .brand{display:flex;align-items:center;gap:11px;font-size:16px;font-weight:750;letter-spacing:-.02em}
+    .brand-mark{width:33px;height:33px;display:grid;grid-template-columns:repeat(2,1fr);gap:3px;padding:5px;border-radius:10px;background:#284d38;box-shadow:0 4px 12px #284d3826}
+    .brand-mark i{border-radius:2px;background:#eaf4e8}.brand-mark i:nth-child(2){opacity:.55}.brand-mark i:nth-child(3){opacity:.72}
+    .topbar-note{color:#859188;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+    .hero{padding:42px 0 42px}
+    h1{margin:0;font-size:clamp(38px,5vw,58px);font-weight:790;line-height:1.16;letter-spacing:-.06em}
+    .hero-copy{max-width:570px;margin:20px 0 0;color:#738176;font-size:16px;line-height:1.8}
+    .section-heading{display:flex;align-items:center;justify-content:space-between;margin:12px 0 18px}
+    .section-heading h2{margin:0;font-size:18px;letter-spacing:-.035em}
+    .count{color:#87958a;font-size:13px}
+    .apps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
+    .app-card{display:flex;flex-direction:column;min-width:0;overflow:hidden;border:1px solid #e2e9e0;border-radius:24px;background:#fff;box-shadow:0 9px 30px #243b2810;transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease}
+    .app-card:hover{transform:translateY(-4px);border-color:#cbdccf;box-shadow:0 16px 40px #243b281c}
+    .app-card:focus-visible{outline:3px solid #4b805e;outline-offset:3px}
+    .preview{height:220px;position:relative;overflow:hidden;display:grid;place-items:center}
+    .preview-notes{background:linear-gradient(140deg,#edf4ed,#dceadf)}
+    .preview-photo{background:linear-gradient(140deg,#e8eee9,#d8e3d8)}
+    .mock-notes{width:210px;height:180px;padding:21px 19px;border-radius:15px 15px 0 0;background:#fff;box-shadow:0 14px 30px #284d3822;transform:translateY(18px) rotate(-4deg)}
+    .mock-head{height:12px;width:68px;border-radius:6px;background:#294b39;margin-bottom:17px}
+    .mock-search{height:21px;border-radius:8px;background:#eef3ee;margin-bottom:15px}
+    .mock-line{height:7px;border-radius:5px;background:#e2e9e1;margin:9px 0}.mock-line.strong{width:60%;background:#789583}.mock-line.short{width:72%}.mock-rule{height:1px;background:#e9eeea;margin:16px 0 10px}
+    .mock-photo{width:245px;height:163px;display:flex;align-items:center;justify-content:center;gap:9px;padding:16px 15px 26px;background:#fff;box-shadow:0 14px 30px #284d3824;transform:translateY(17px) rotate(4deg)}
+    .mock-photo span{width:50%;height:100%;background:linear-gradient(160deg,#c6d9cb 0 38%,#7ea389 39% 70%,#adc5b2 71%);border-radius:2px}.mock-photo span:last-child{background:linear-gradient(155deg,#d9e3d4 0 42%,#9bbdaa 43% 70%,#648c74 71%)}
+    .app-info{display:flex;align-items:center;gap:17px;padding:23px 24px 25px}
+    .app-icon{width:62px;height:62px;flex:none;border-radius:15px;box-shadow:0 5px 16px #203d2b24}
+    .app-text{min-width:0;flex:1}.app-text h3{margin:0 0 5px;font-size:19px;letter-spacing:-.04em}.app-text p{margin:0;color:#7d8d80;font-size:13px;line-height:1.5}
+    .open{flex:none;display:inline-flex;align-items:center;justify-content:center;min-width:68px;height:34px;border-radius:17px;background:#edf5ed;color:#326548;font-size:13px;font-weight:750}
+    .app-card:hover .open{background:#315d42;color:#fff}
+    .preview-assets{background:linear-gradient(140deg,#e2f0e6,#c7dfd0)}.mock-assets{width:220px;height:150px;padding:23px;border-radius:16px;background:linear-gradient(130deg,#285e4b,#153e35);color:white;box-shadow:0 14px 30px #284d3829;transform:translateY(20px) rotate(-3deg)}.mock-assets small{font-size:11px;color:#bfdccc}.mock-assets strong{display:block;margin-top:14px;font-size:25px}.mock-assets i{display:block;height:1px;margin:17px 0;background:#ffffff55}.mock-assets span{font-size:11px;color:#d4e8d9}
+    .footer{display:flex;justify-content:space-between;gap:16px;padding:40px 0 32px;color:#94a096;font-size:12px}
+    @media(max-width:720px){.shell{width:min(100% - 32px,520px)}.topbar{height:66px}.topbar-note{display:none}.hero{padding:28px 0 34px}.hero-copy{font-size:14px;margin-top:15px}.apps{grid-template-columns:1fr;gap:14px}.preview{height:165px}.mock-notes{transform:translateY(32px) rotate(-4deg)}.mock-photo{transform:translateY(25px) rotate(4deg)}.app-info{padding:17px;gap:13px}.app-icon{width:54px;height:54px;border-radius:13px}.app-text h3{font-size:17px}.app-text p{font-size:12px}.footer{padding-top:32px}}
+    @media(prefers-reduced-motion:reduce){.app-card{transition:none}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>我的应用</span></div>
+      <span class="topbar-note">PWA APPS</span>
+    </header>
+    <main>
+      <section class="hero" aria-labelledby="page-title">
+        <h1 id="page-title">把灵感，装进口袋。</h1>
+        <p class="hero-copy">简单好用的个人应用。打开即用，也可以添加到手机主屏幕，像普通 App 一样随时进入。</p>
+      </section>
+      <section aria-labelledby="apps-title">
+        <div class="section-heading"><h2 id="apps-title">应用精选</h2><span class="count">共 3 款应用</span></div>
+        <div class="apps">
+          <a class="app-card" href="__BASE__notes/" aria-label="打开笔记应用">
+            <div class="preview preview-notes" aria-hidden="true"><div class="mock-notes"><div class="mock-head"></div><div class="mock-search"></div><div class="mock-line strong"></div><div class="mock-line short"></div><div class="mock-rule"></div><div class="mock-line strong"></div><div class="mock-line"></div></div></div>
+            <div class="app-info"><img class="app-icon" src="__BASE__notes/icon.svg" width="62" height="62" alt=""><div class="app-text"><h3>笔记</h3><p>随手记录想法，私密同步笔记</p></div><span class="open">打开</span></div>
+          </a>
+          <a class="app-card" href="__BASE__photo-layout/" aria-label="打开照片布局应用">
+            <div class="preview preview-photo" aria-hidden="true"><div class="mock-photo"><span></span><span></span></div></div>
+            <div class="app-info"><img class="app-icon" src="__BASE__photo-layout/icon.svg" width="62" height="62" alt=""><div class="app-text"><h3>照片布局</h3><p>选择模板，轻松排版并分享照片</p></div><span class="open">打开</span></div>
+          </a>
+          <a class="app-card" href="__BASE__assets/" aria-label="打开资产簿应用"><div class="preview preview-assets" aria-hidden="true"><div class="mock-assets"><small>当前净资产</small><strong>¥ 1,268,500</strong><i></i><span>资产追踪 · 加密备份</span></div></div><div class="app-info"><img class="app-icon" src="__BASE__assets/icon.svg" width="62" height="62" alt=""><div class="app-text"><h3>资产簿</h3><p>记录余额，查看净资产变化</p></div><span class="open">打开</span></div></a>
+        </div>
+      </section>
+    </main>
+    <footer class="footer"><span>做给自己，也分享给你。</span><span>随用随开 · 无需注册</span></footer>
+  </div>
+</body>
+</html>

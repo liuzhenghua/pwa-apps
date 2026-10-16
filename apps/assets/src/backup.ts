@@ -1,0 +1,18 @@
+import {validate,type Data} from './data';
+const enc=new TextEncoder(),dec=new TextDecoder();
+const repo='liuzhenghua/pwa-apps-data';
+export const repository=repo;
+export function validateFolder(value:string):string{const folder=value.trim();if(!/^[\w-]{1,60}$/.test(folder))throw Error('名字只可使用字母、数字、下划线和连字符，最多 60 位');return folder}
+const cloudUrl=(folder:string|null)=>`https://api.github.com/repos/${repo}/contents/assets/${folder===null?'':`${encodeURIComponent(validateFolder(folder))}/`}portfolio.json`;
+const b64=(bytes:Uint8Array)=>btoa(Array.from(bytes,x=>String.fromCharCode(x)).join(''));
+const unb64=(s:string)=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+const random=(n:number)=>crypto.getRandomValues(new Uint8Array(n));
+async function key(secret:string,salt:Uint8Array){const base=await crypto.subtle.importKey('raw',enc.encode(secret),'PBKDF2',false,['deriveKey']);return crypto.subtle.deriveKey({name:'PBKDF2',hash:'SHA-256',salt:salt as BufferSource,iterations:600000},base,{name:'AES-GCM',length:256},false,['encrypt','decrypt'])}
+type Encrypted={format:'assets-encrypted-v1';salt:string;iv:string;ciphertext:string};
+export async function encrypt(data:Data,secret:string):Promise<Encrypted>{if(secret.length<12)throw Error('加密口令至少需要 12 个字符');const salt=random(16),iv=random(12),k=await key(secret,salt);const bytes=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv:iv as BufferSource},k,enc.encode(JSON.stringify(data))));return {format:'assets-encrypted-v1',salt:b64(salt),iv:b64(iv),ciphertext:b64(bytes)}}
+export async function decrypt(raw:unknown,secret:string):Promise<Data>{const e=raw as Encrypted;if(e?.format!=='assets-encrypted-v1'||!e.salt||!e.iv||!e.ciphertext)throw Error('加密备份格式错误');try{const k=await key(secret,unb64(e.salt));const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(e.iv) as BufferSource},k,unb64(e.ciphertext) as BufferSource);return validate(JSON.parse(dec.decode(plain)))}catch{throw Error('解密失败：口令错误或备份已损坏')}}
+const headers=(token:string)=>({Accept:'application/vnd.github+json',Authorization:`Bearer ${token}`,'X-GitHub-Api-Version':'2022-11-28'});
+export async function checkRepo(token:string){const r=await fetch(`https://api.github.com/repos/${repo}`,{headers:headers(token),cache:'no-store'});if(!r.ok)throw Error(`无法访问私有仓库（${r.status}）`);const info=await r.json();if(!info.private)throw Error('数据仓库必须设为 Private')}
+export async function readCloud(token:string,folder:string|null):Promise<{sha:string|null;payload:Encrypted|null}>{const r=await fetch(cloudUrl(folder),{headers:headers(token),cache:'no-store'});if(r.status===404)return {sha:null,payload:null};if(!r.ok)throw Error(`读取云端失败（${r.status}）`);const file=await r.json();try{return {sha:file.sha,payload:JSON.parse(dec.decode(unb64((file.content as string).replace(/\s/g,''))))}}catch{throw Error('云端文件格式错误')}}
+export async function writeCloud(token:string,folder:string,payload:Encrypted,sha:string|null){const content=b64(enc.encode(JSON.stringify(payload)));const r=await fetch(cloudUrl(folder),{method:'PUT',headers:{...headers(token),'Content-Type':'application/json'},body:JSON.stringify({message:'Backup encrypted assets',content,...(sha?{sha}:{})})});if(!r.ok)throw Error(r.status===409||r.status===422?'云端文件已变化，请重新读取后再上传':`上传失败（${r.status}）`);return (await r.json()).content.sha as string}
+export function download(name:string,value:unknown){const blob=new Blob([JSON.stringify(value,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),30000)}

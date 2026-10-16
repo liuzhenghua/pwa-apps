@@ -6,6 +6,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev:notes": "npm run dev -w @pwa-apps/notes",
+    "dev:assets": "npm run dev -w @pwa-apps/assets",
     "dev:photo-layout": "npm run dev -w @pwa-apps/photo-layout",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
