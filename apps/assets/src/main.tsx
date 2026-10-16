@@ -142,7 +142,9 @@ function App() {
     [note, setNote] = useState("");
   const [reportMonth, setReportMonth] = useState(""),
     [baselineMonth, setBaselineMonth] = useState("");
-  const [returnToAudit, setReturnToAudit] = useState(false);
+  const [auditEditingId, setAuditEditingId] = useState<string | null>(null);
+  const [auditAmounts, setAuditAmounts] = useState<Record<string, string>>({});
+  const [auditChangedIds, setAuditChangedIds] = useState<string[]>([]);
   const [includeProperty, setIncludeProperty] = useState(false);
   const [detailAmount, setDetailAmount] = useState<string | null>(null);
   const [assetBreakdownOpen, setAssetBreakdownOpen] = useState(false);
@@ -151,9 +153,6 @@ function App() {
   const [reportAssetFilter, setReportAssetFilter] = useState("all");
   const [trendMetric, setTrendMetric] = useState<TrendMetric>("net");
   const [includeTrendProperty, setIncludeTrendProperty] = useState(false);
-  useEffect(() => {
-    if (modal !== "balance") setReturnToAudit(false);
-  }, [modal]);
   const [token, setToken] = useState(() =>
       hasBundledToken ? "" : localStorage.getItem("assets:token") || "",
     ),
@@ -171,9 +170,6 @@ function App() {
     [syncStage, setSyncStage] = useState(""),
     [syncFailed, setSyncFailed] = useState(false);
   const [lastSync, setLastSync] = useState<SyncRecord | null>(readSyncRecord);
-  const [audit, setAudit] = useState<
-    Record<string, "checked" | "skipped" | "change">
-  >({});
   const dataRef = useRef(data);
   useEffect(() => {
     if (hasBundledToken) localStorage.removeItem("assets:token");
@@ -361,15 +357,7 @@ function App() {
       ),
       balances: replaceCurrentBalances(data.balances, [b]),
     }, b.date);
-    if (returnToAudit) {
-      const changed = latest(data, b.accountId)?.amount !== b.amount;
-      setAudit((previous) => ({
-        ...previous,
-        [b.accountId]: changed ? "change" : "checked",
-      }));
-      setReturnToAudit(false);
-      setModal("audit");
-    } else setModal(null);
+    setModal(null);
     setMessage("本月余额已更新");
   }
   async function saveDetailBalance() {
@@ -414,26 +402,56 @@ function App() {
     setModal(null);
   }
   async function finishAudit() {
-    const checked = Object.entries(audit)
-        .filter(([, v]) => v === "checked" || v === "change")
-        .map(([id]) => id),
-      skipped = active
-        .map((a) => a.id)
-        .filter((id) => audit[id] !== "checked" && audit[id] !== "change");
-    const changed = Object.entries(audit)
-      .filter(([, v]) => v === "change")
-      .map(([id]) => id);
-    await commit(data, today(), {
-      checked,
-      skipped,
+    let changed = [...auditChangedIds];
+    if (auditEditingId) {
+      const didChange = await saveAuditAmount(auditEditingId);
+      if (didChange) changed = [...new Set([...changed, auditEditingId])];
+    }
+    await commit(dataRef.current, today(), {
+      checked: active.map((account) => account.id),
+      skipped: [],
       changed,
       auditedAt: Date.now(),
     });
     setModal(null);
-    setAudit({});
-    setMessage(
-      `盘点已保存：核对 ${checked.length} 个，沿用或跳过 ${skipped.length} 个`,
-    );
+    setAuditAmounts({});
+    setAuditChangedIds([]);
+    setAuditEditingId(null);
+    setMessage(`盘点已保存：${changed.length} 个账户金额发生变更`);
+  }
+  async function saveAuditAmount(accountId: string) {
+    const value = auditAmounts[accountId];
+    if (value === undefined) {
+      setAuditEditingId(null);
+      return false;
+    }
+    if (value === "" || !Number.isFinite(Number(value)) || Number(value) < 0) {
+      setMessage("请输入有效的非负余额");
+      return false;
+    }
+    const current = dataRef.current;
+    const changed = latest(current, accountId)?.amount !== Number(value);
+    if (!changed) {
+      setAuditEditingId(null);
+      return false;
+    }
+    const balance: Balance = {
+      id: crypto.randomUUID(),
+      accountId,
+      amount: Number(value),
+      date: today(),
+      recordedAt: Date.now(),
+      note: "资产盘点",
+    };
+    const next = {
+      ...current,
+      balances: replaceCurrentBalances(current.balances, [balance]),
+    };
+    await commit(next);
+    setAuditChangedIds((previous) => [...new Set([...previous, accountId])]);
+    setAuditEditingId(null);
+    setMessage(`${accountTitle(active.find((account) => account.id === accountId)!)}金额已更新`);
+    return true;
   }
   const reports = data.reports || [];
   const selectedReport =
@@ -1650,41 +1668,80 @@ function App() {
             {modal === "audit" && (
               <>
                 <p className="subtle">
-                  集中核对各账户：余额没变选“确认无变化”，有变化点“改余额”。
+                  点击金额可直接修改；完成后会更新本月报告。
                 </p>
                 {active.map((a) => (
                   <div className="audit-row" key={a.id}>
-                    <div>
+                    <div className="audit-account">
                       <strong>{accountTitle(a)}</strong>
                       <small>
-                        {latest(data, a.id)
-                          ? money(latest(data, a.id)!.amount)
-                          : "未录入"}
+                        {a.category} · {a.kind === "asset" ? "资产" : "负债"}
                       </small>
                     </div>
-                    <select
-                      value={audit[a.id] || "skipped"}
-                      onChange={(e) =>
-                        setAudit({
-                          ...audit,
-                          [a.id]: e.target.value as
-                            "checked" | "skipped" | "change",
-                        })
-                      }
-                    >
-                      <option value="skipped">跳过</option>
-                      <option value="checked">确认无变化</option>
-                      {audit[a.id] === "change" && (
-                        <option value="change">已更新金额</option>
-                      )}
-                    </select>
+                    {auditEditingId === a.id ? (
+                      <input
+                        className="audit-amount-input"
+                        autoFocus
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        inputMode="decimal"
+                        value={auditAmounts[a.id] ?? ""}
+                        onChange={(event) =>
+                          setAuditAmounts((previous) => ({
+                            ...previous,
+                            [a.id]: event.target.value,
+                          }))
+                        }
+                        onBlur={() => void saveAuditAmount(a.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") event.currentTarget.blur();
+                        }}
+                        aria-label={`${accountTitle(a)}金额`}
+                      />
+                    ) : (
+                      <button
+                        className="audit-amount"
+                        onClick={() => {
+                          setAuditAmounts((previous) => ({
+                            ...previous,
+                            [a.id]:
+                              previous[a.id] ??
+                              latest(data, a.id)?.amount.toString() ??
+                              "",
+                          }));
+                          setAuditEditingId(a.id);
+                        }}
+                        aria-label={`编辑${accountTitle(a)}金额`}
+                      >
+                        {auditAmounts[a.id] !== undefined
+                          ? money(Number(auditAmounts[a.id]))
+                          : latest(data, a.id)
+                            ? money(latest(data, a.id)!.amount)
+                            : "未录入"}
+                      </button>
+                    )}
                     <button
+                      className="audit-edit"
+                      onMouseDown={(event) => {
+                        if (auditEditingId === a.id) event.preventDefault();
+                      }}
                       onClick={() => {
-                        setReturnToAudit(true);
-                        openBalance(a.id);
+                        if (auditEditingId === a.id) {
+                          void saveAuditAmount(a.id);
+                          return;
+                        }
+                        setAuditAmounts((previous) => ({
+                          ...previous,
+                          [a.id]:
+                            previous[a.id] ??
+                            latest(data, a.id)?.amount.toString() ??
+                            "",
+                        }));
+                        setAuditEditingId(a.id);
                       }}
                     >
-                      改余额
+                      {auditEditingId === a.id ? "更新" : "改余额"}
                     </button>
                   </div>
                 ))}
