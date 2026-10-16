@@ -18,3 +18,22 @@
 
 .topline,.detail-bar{position:sticky;top:env(safe-area-inset-top);z-index:5;background:#f7f8f6}
 .detail-bar{background:#fff}
+
+/* Mobile app interaction and shared slate palette. */
+html{touch-action:pan-x pan-y;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{background:#f5f7fa}
+button{touch-action:manipulation}
+.topline,.detail-bar{top:0;background:#fff;padding:12px 0;border-bottom:1px solid #edf0f3}
+.list-page h1{color:#526478}
+.new-note,.read-cloud,.sync-choices button{background:#263747;box-shadow:none}
+.sync-button{color:#526478;border-color:#dce3ea}
+.search{background:#f0f3f6;color:#8c99a6}
+.search input{font-size:16px}
+.field input{min-width:0;font-size:16px;color:#263747;border-color:#dce3ea;background:#fafbfd;outline-color:#627e99}
+.field span,.repo-name{color:#8794a1;line-height:1.6;overflow-wrap:anywhere}
+.back{color:#45617b;min-height:40px}.saved,.edit-date,.note-date{color:#8b97a3}
+.close-dialog{flex:none;background:#f0f3f6;color:#62778a}
+.sync-dialog{overscroll-behavior:contain}.modal-backdrop{background:#17253380}
+.sync-choices button:last-child{background:#edf2f7;color:#45617b}
+.dialog-kicker{color:#879bad}.empty-icon{background:#edf2f7;color:#627e99}
+@media(max-width:600px){.list-page,.detail{padding-left:18px;padding-right:18px}.title-input{font-size:27px}.detail textarea{font-size:17px}.sync-dialog{padding-left:20px;padding-right:20px}.sync-choices button{white-space:nowrap}}

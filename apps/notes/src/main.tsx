@@ -39,6 +39,12 @@ function App() {
     const saved = readStored<Credentials>(credentialsKey, { folder: '', token: '' });
     if (saved.token && saved.token !== bundledTokenMarker) saveStored(credentialsKey, { ...saved, token: bundledTokenMarker });
   }, []);
+  useEffect(() => {
+    if (!showSync) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previous; };
+  }, [showSync]);
   async function accessToken(): Promise<string> {
     if (!hasBundledToken) return token.trim();
     if (tokenCache.current?.passphrase === tokenPassphrase) return tokenCache.current.token;
