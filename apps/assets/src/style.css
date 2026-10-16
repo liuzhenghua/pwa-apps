@@ -11,3 +11,41 @@
 @media(max-width:390px){.accounts-head h1{font-size:25px}.accounts-head .action-row>*{font-size:12px;padding:9px 10px}}
 
 .institution-heading{padding:15px 0 5px;color:#647f6c;font-size:12px;font-weight:750}.institution-heading:first-child{padding-top:12px}.liquid-summary{display:block;color:#426f57;font-weight:700;margin-bottom:5px}
+
+.account-detail>p{color:#82958a;font-size:13px;line-height:1.6}.account-detail>h2{margin:16px 0;font-size:28px}.account-detail>h3{margin:24px 0 12px;font-size:14px}.account-detail .action-row button{white-space:nowrap}.sheet-head h2{min-width:0;overflow-wrap:anywhere}.sheet-head button{flex:none}.sheet{overscroll-behavior:contain}
+
+.overview-distribution{margin-top:25px}.overview-distribution .section-head{margin:0 0 16px}.distribution-track{display:flex;gap:2px;height:12px;overflow:hidden;border-radius:8px;background:#e8eee8}.distribution-segment{min-width:1px}.color-0{background:#237f90}.color-1{background:#47a08d}.color-2{background:#e9ad4e}.color-3{background:#b5a2d7}.color-4{background:#6e9bc3}.color-5{background:#bd827c}.distribution-legend{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px;margin-top:15px}.distribution-legend button{display:flex;align-items:center;gap:8px;min-width:0;padding:0;border:0;background:none;text-align:left;color:inherit;font-size:12px}.legend-dot{width:9px;height:9px;border-radius:50%;flex:none}.legend-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.distribution-legend strong{font-weight:600;white-space:nowrap}.overview-recent{margin-top:26px;padding-top:21px;border-top:1px solid #dde5df}.overview-recent .section-head{margin:0 0 9px}.overview-recent .row{border:0;min-height:74px}.recent-icon{display:grid;place-items:center;flex:none;width:30px;color:#35574a;font-size:24px}.overview-recent .row-text strong{font-size:14px}.overview-recent .row-text small{font-size:12px}.overview-recent .row b{font-size:14px}
+
+/* Overview follows the reference: summary, distribution, recent updates. */
+.app:has(.overview-distribution){background:#fcfcfc}
+.overview-distribution{margin-top:16px;color:#151918}
+.overview-distribution .section-head{margin:0 0 15px}
+.overview-distribution .section-head h2,.overview-recent .section-head h2{font-size:16px;font-weight:750;color:#111}
+.overview-distribution .section-head span,.overview-recent .section-head button{font-size:12px;font-weight:400;color:#666}
+.distribution-track{height:12px;gap:2px;border-radius:7px}
+.distribution-segment{min-width:0}
+.distribution-legend{gap:10px 9px;margin-top:14px}
+.distribution-legend button{font-size:12px;gap:8px;color:#111}
+.distribution-legend strong{font-weight:500}
+.legend-dot{width:9px;height:9px}
+.overview-recent{margin-top:22px;padding-top:23px;border-top:1px solid #ddd;color:#111}
+.overview-recent .section-head{margin:0 0 13px}
+.overview-recent .row{min-height:53px;padding:9px 0;gap:16px;color:#111}
+.overview-recent .recent-icon{width:36px;color:#111}
+.overview-recent .row-text strong{font-size:14px;font-weight:650}
+.overview-recent .row-text small{margin-top:4px;font-size:13px;color:#666}
+.overview-recent .row b{font-size:14px;font-weight:500}
+.hero-stats div{font-size:13px}.hero-stats strong{font-size:19px;margin-top:10px}
+
+.audit-entry{float:right;display:inline-flex;align-items:center;min-height:32px;margin-top:-7px;padding:5px 10px;border:1px solid #ffffff38;border-radius:8px;background:#ffffff0d;color:#d0e5da;font:inherit;font-size:12px;font-weight:600;white-space:nowrap}.audit-entry:active{background:#ffffff25}
+
+.financial-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0 22px}.metric{min-width:0;padding:15px 13px;border:1px solid #e3eae5;border-radius:13px;background:#f0f6f2}.metric>span{display:block;color:#536e60;font-size:12px}.metric>strong{display:block;margin:9px 0 6px;font-size:clamp(18px,5vw,25px);letter-spacing:-.03em;overflow-wrap:anywhere;color:#204d3c}.metric>small{color:#718579;font-size:11px}.financial-metrics>p{grid-column:1/-1;margin:0;color:#839287;font-size:11px;line-height:1.6}.financial-metrics>.metric-warning{color:#986b32}.distribution-legend .legend-name{white-space:normal;overflow:visible;font-size:12px;line-height:1.4}
+
+.hero{background:#183e3a;box-shadow:0 10px 24px #1a2d3214}.hero-stats .total-assets strong{color:#c0e1f5}.hero-stats .total-debts strong{color:#f4c19e}.metric-liquid{background:#f0f5fc;border-color:#e1e8f3}.metric-liquid>strong{color:#2b629b}.metric-liquid>span{color:#536b88}.metric-debt{background:#fdf5ee;border-color:#f0e4d9}.metric-debt>strong{color:#ac6837}.metric-debt>span{color:#866c59}.overview-recent .recent-icon{width:36px;height:36px;border-radius:10px;background:#edf3fa;color:#4674a4}.recent-icon svg{width:22px;height:22px}.overview-recent .icon-debt{background:#fbefe5;color:#b47944}.overview-recent .icon-investment{background:#f0ecfa;color:#8270ad}.overview-recent .icon-home{background:#f6eee5;color:#a48053}.overview-recent .icon-wallet{background:#eaf4f3;color:#4c8e87}.overview-recent .row .amount-asset{color:#304f71}.overview-recent .row .amount-debt{color:#ac6837}
+
+.hero{background:#eef2f1;color:#253d38;border:1px solid #e0e7e4;box-shadow:0 6px 18px #203b3006}.hero>span{color:#6b8078}.hero h1{color:#203f36;margin-bottom:12px}.hero-rule{background:#d7e0dc;margin-top:20px}.hero-stats div{color:#75857f}.hero-stats .total-assets strong{color:#365f81}.hero-stats .total-debts strong{color:#a76c45}.audit-entry{color:#4b6c5e;border-color:#cbd9d1;background:#ffffff70}.audit-entry:active{background:#dfe9e3}.hero-indicators{display:flex;flex-wrap:wrap;gap:7px 18px;font-size:11px;line-height:1.6;color:#6c7e75}.hero-indicators b{font-weight:600;margin-left:4px}.hero-indicators span:first-child b{color:#456e8c}.hero-indicators span:last-child b{color:#a76c45}.distribution-legend .legend-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.hero{background:#263747;color:#f5f7fa;border-color:#263747;box-shadow:0 8px 22px #20304016}.hero>span{color:#bcc7d1}.hero h1{color:#fff}.hero-rule{background:#ffffff24}.hero-stats div{color:#acbbc7}.hero-stats .total-assets strong{color:#d5e6f5}.hero-stats .total-debts strong{color:#ebc7ab}.hero-indicators{color:#b6c2cc}.hero-indicators span:first-child b{color:#d5e6f5}.hero-indicators span:last-child b{color:#ebc7ab}.hero .audit-entry{color:#dce5ec;border-color:#ffffff30;background:#ffffff08}.hero .audit-entry:active{background:#ffffff18}
+
+/* Shared brand and navigation palette. */
+.top{background:#fff;border-bottom-color:#e7ebef}.brand{gap:10px}.brand-icon{background:#263747;color:#f1f5f9;border-radius:11px}.brand-icon svg{width:29px;height:29px}.brand strong{color:#263747;letter-spacing:.04em}.brand-user{color:#89939e}.avatar{background:#f0f3f6;color:#526478}.bottom{background:#fff;border-top-color:#e7ebef}.bottom button{color:#97a1ac}.bottom button.active{color:#304b65}.bottom button.active span{color:#304b65}.bottom button:active{background:#f3f6f9}
