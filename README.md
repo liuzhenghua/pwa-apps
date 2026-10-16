@@ -55,7 +55,7 @@ rm .env.token.local
 
 脚本会把同一份 `VITE_GITHUB_TOKEN_BOX` 密文写入 `apps/notes/.env.local` 和 `apps/assets/.env.local`，供本地 Vite 使用。把其中等号后的值配置为本仓库的 GitHub Actions Secret **`DATA_GITHUB_TOKEN_BOX`**；[部署工作流](.github/workflows/deploy.yml)会在构建两个应用时注入密文。修改本地 `.env.local` 后重启开发服务器。所有 `.local` 文件均被 Git 忽略。
 
-构建产物中的密文对访问者可见；云端访问口令越容易猜，Token 被解出的风险越高。解锁口令只在当前页面内存中暂存，不写入浏览器存储。忘记口令或更换 Token 时，重新生成密文、更新 CI Secret 并重新部署。未配置密文时，两款应用仍保留手动输入 Token 的方式。
+构建产物中的密文对访问者可见；云端访问口令越容易猜，Token 被解出的风险越高。解锁口令保存在当前浏览器的本地存储中；清除浏览器数据或使用应用内的清除配置按钮可删除。忘记口令或更换 Token 时，重新生成密文、更新 CI Secret 并重新部署。未配置密文时，两款应用仍保留手动输入 Token 的方式。
 
 注意：Token 的写权限覆盖所选仓库，而不只覆盖某个应用目录。加密数据内容仍由各应用自己的口令保护，但拿到 Token 的人能删除或覆盖密文文件。
 

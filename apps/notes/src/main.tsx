@@ -6,6 +6,7 @@ import './style.css';
 
 const key = 'pwa-apps:notes';
 const credentialsKey = 'pwa-apps:notes:github-credentials';
+const tokenPassphraseKey = 'pwa-apps:notes:cloud-passphrase';
 const bundledTokenBox = import.meta.env.VITE_GITHUB_TOKEN_BOX || '';
 const hasBundledToken = Boolean(bundledTokenBox.trim());
 const bundledTokenMarker = 'encrypted-build';
@@ -23,7 +24,7 @@ function App() {
   const [showSync, setShowSync] = useState(false);
   const [folder, setFolder] = useState(() => readStored<Credentials>(credentialsKey, { folder: '', token: '' }).folder);
   const [token, setToken] = useState(() => hasBundledToken ? '' : readStored<Credentials>(credentialsKey, { folder: '', token: '' }).token);
-  const [tokenPassphrase, setTokenPassphrase] = useState('');
+  const [tokenPassphrase, setTokenPassphrase] = useState(() => localStorage.getItem(tokenPassphraseKey) || '');
   const [secret, setSecret] = useState(() => readStored<Credentials>(credentialsKey, { folder: '', token: '' }).secret ?? '');
   const [showTokenHelp, setShowTokenHelp] = useState(false);
   const [remote, setRemote] = useState<Awaited<ReturnType<typeof getRemote>> | null>(null);
@@ -159,6 +160,7 @@ function App() {
   }
   function clearCredentials() {
     localStorage.removeItem(credentialsKey);
+    localStorage.removeItem(tokenPassphraseKey);
     tokenCache.current = null;
     setFolder(''); setToken(''); setTokenPassphrase(''); setSecret(''); setRemote(null); setSyncMessage('已清除这台设备保存的同步配置。');
   }
@@ -196,14 +198,14 @@ function App() {
       <div className="dialog-heading"><div><span className="dialog-kicker">GITHUB 同步</span><h2 id="sync-title">同步笔记</h2></div><button className="close-dialog" onClick={closeSync} aria-label="关闭">×</button></div>
       <p className="repo-name">私有仓库：{storageRepository}</p>
       <label className="field">名字 <span>用作仓库中的文件夹</span><input value={folder} onChange={event => { setFolder(event.target.value); setRemote(null); }} placeholder="例如 liu" autoComplete="username" /></label>
-      {hasBundledToken ? <label className="field">云端访问口令 <span>用于解锁 GitHub 访问凭证；仅在当前页面暂存。</span><input type="password" value={tokenPassphrase} onChange={event => { setTokenPassphrase(event.target.value); tokenCache.current = null; setRemote(null); }} placeholder="输入云端访问口令" autoComplete="off" /></label> : <>
+      {hasBundledToken ? <label className="field">云端访问口令 <span>用于解锁 GitHub 访问凭证；保存在当前浏览器。</span><input type="password" value={tokenPassphrase} onChange={event => { setTokenPassphrase(event.target.value); if (event.target.value) localStorage.setItem(tokenPassphraseKey, event.target.value); else localStorage.removeItem(tokenPassphraseKey); tokenCache.current = null; setRemote(null); }} placeholder="输入云端访问口令" autoComplete="off" /></label> : <>
         <div className="token-label"><strong>GitHub Token</strong><button className="help-button" type="button" onClick={() => setShowTokenHelp(value => !value)} aria-label="如何获取 GitHub Token" aria-expanded={showTokenHelp}>?</button></div>
         {showTokenHelp && <div className="token-help"><p>在 GitHub 创建 Fine-grained personal access token，仓库权限只选 <strong>{storageRepository}</strong>，将 <strong>Contents</strong> 设为 <strong>Read and write</strong>。创建后复制 Token 粘贴到下方。</p><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">前往 GitHub 创建 Token ↗</a></div>}
         <label className="field token-field"><span>首次配置后会保存在这台设备上</span><input type="password" value={token} onChange={event => { setToken(event.target.value); setRemote(null); }} placeholder="Fine-grained personal access token" autoComplete="off" /></label>
       </>}
       <label className="field">数据加密口令 <span>用于加密和解密笔记；保存在这台设备，丢失后无法恢复云端笔记。</span><input type="password" value={secret} onChange={event => { setSecret(event.target.value); setRemote(null); }} placeholder="输入数据加密口令" autoComplete="off" /></label>
       {(folder || token || tokenPassphrase || secret) && <button className="clear-credentials" onClick={clearCredentials} type="button">清除已保存的配置</button>}
-      <p className="credential-notice">{hasBundledToken ? 'Token 以密文打包；云端访问口令仅在当前页面暂存。' : 'Token 保存在当前浏览器。'}数据加密口令会保存在当前浏览器；请勿在共用设备上配置。</p>
+      <p className="credential-notice">{hasBundledToken ? 'Token 以密文打包；云端访问口令保存在当前浏览器。' : 'Token 保存在当前浏览器。'}数据加密口令会保存在当前浏览器；请勿在共用设备上配置。</p>
       <button className="read-cloud" onClick={startSync} disabled={syncBusy}>{syncBusy ? '同步中…' : '开始同步'}</button>
       {syncError && <p className="sync-error" role="alert">{syncError}</p>}{syncMessage && <p className="sync-success" role="status">{syncMessage}</p>}
       {remote && <div className="sync-preview"><h3>同步预览</h3><div className="sync-counts"><span>本地 <strong>{notes.length}</strong> 条</span><span>云端 <strong>{remote.notes.length}</strong> 条</span></div><p>存在同一时间修改的笔记，或编辑与删除冲突。请选择要保留的一边，另一边将被覆盖。</p>{differences.length ? <ul className="diff-list">{differences.map((item, index) => <li key={`${item.kind}-${index}`}><span>{item.label}</span><em>{item.kind}</em></li>)}</ul> : <p className="same-notes">两边笔记内容相同。</p>}<div className="sync-choices"><button onClick={upload} disabled={syncBusy}>本地 → 云端</button><button onClick={download} disabled={syncBusy}>云端 → 本地</button></div></div>}
