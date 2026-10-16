@@ -37,3 +37,59 @@ button{touch-action:manipulation}
 .sync-choices button:last-child{background:#edf2f7;color:#45617b}
 .dialog-kicker{color:#879bad}.empty-icon{background:#edf2f7;color:#627e99}
 @media(max-width:600px){.list-page,.detail{padding-left:18px;padding-right:18px}.title-input{font-size:27px}.detail textarea{font-size:17px}.sync-dialog{padding-left:20px;padding-right:20px}.sync-choices button{white-space:nowrap}}
+
+/* Shared application shell. */
+.notes-app{width:min(100%,720px);min-height:100dvh;margin:auto;background:#f7f9f8;box-shadow:0 0 50px #18392a0b}
+.app-top{position:sticky;top:0;z-index:6;height:72px;padding:0 22px;display:flex;align-items:center;border-bottom:1px solid #e7ebef;background:#fff}
+.app-brand{display:flex;align-items:center;gap:10px;color:#263747}
+.app-brand>span{display:grid;place-items:center;width:38px;height:38px;border-radius:11px;background:#263747;color:#f1f5f9}
+.app-brand svg{width:22px;height:22px}
+.app-brand strong{font-size:17px;letter-spacing:.04em}
+.app-brand small{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#89939e;font-size:12px}
+.app-content{min-height:calc(100dvh - 72px)}
+.list-page,.settings-page{width:100%;min-height:calc(100dvh - 72px);padding:20px 22px calc(90px + env(safe-area-inset-bottom))}
+.detail{width:100%;min-height:calc(100dvh - 72px);padding:20px 22px calc(28px + env(safe-area-inset-bottom))}
+.topline{position:static;min-height:34px;padding:0;border:0;background:transparent}
+.list-page h1,.page-label{margin:0;color:#84938c;font-size:13px;font-weight:650;letter-spacing:0}
+.list-page h1 span{margin-left:7px;color:#a1aba6;font-weight:500}
+.new-note{width:34px;height:34px;border-radius:10px;box-shadow:none}
+.new-note svg{width:18px;height:18px}
+.search{margin-top:15px}
+.bottom-nav{position:fixed;z-index:7;bottom:0;left:50%;transform:translateX(-50%);width:min(100%,720px);height:calc(70px + env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(2,1fr);padding-bottom:env(safe-area-inset-bottom);border-top:1px solid #e7ebef;background:#fff}
+.bottom-nav button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:0;background:none;color:#97a1ac;font-size:11px}
+.bottom-nav svg{width:22px;height:22px}
+.bottom-nav button.active{color:#304b65;font-weight:750}
+.page-label{margin-bottom:15px}
+.settings-card{margin-bottom:14px;padding:18px;border:1px solid #e7ebef;border-radius:8px;background:#fff;box-shadow:0 2px 9px #26374708}
+.settings-card h2{margin:0;font-size:16px;color:#263747}
+.settings-card h2{display:flex;align-items:center;gap:7px}.settings-card h2 svg{width:18px;height:18px;color:#60798c}
+.settings-card>p{margin:13px 0 0;color:#82908c;font-size:13px;line-height:1.65}
+.sync-summary{display:flex;align-items:center;gap:10px;margin:14px 0 10px;padding:11px 12px;border:1px solid #dce8e1;border-radius:8px;background:#f6faf7}
+.sync-summary>span{flex:none;width:8px;height:8px;border-radius:50%;background:#4d8c72}
+.sync-summary.pending{border-color:#eadfcf;background:#fdf9f3}
+.sync-summary.pending>span{background:#b47b3f}
+.sync-summary.idle{border-color:#e4e8e6;background:#fafbfa}.sync-summary.idle>span{background:#a3ada8}
+.sync-summary strong,.sync-summary small{display:block}.sync-summary strong{color:#354d42;font-size:13px}.sync-summary small{margin-top:3px;color:#87968e;font-size:11px}
+.settings-actions{display:flex;gap:9px;margin-top:14px}
+.settings-actions button{min-height:42px;padding:0 15px;border:1px solid #d7e2dc;border-radius:11px;background:#fff;color:#526f61;font-size:13px;font-weight:650}
+.settings-actions .sync-now{border-color:#263747;background:#263747;color:#fff}
+.settings-actions button:disabled{opacity:.55}
+.note-count{display:flex;align-items:baseline;gap:5px}.note-count strong{color:#304b65;font-size:22px}
+.empty-icon svg{width:30px;height:30px;stroke-width:1.6}
+.detail-actions{display:flex;align-items:center;gap:12px}.back{display:inline-flex;align-items:center;gap:3px}.back svg{width:20px;height:20px}.delete-note{display:grid;place-items:center;width:34px;height:34px;padding:0;border:0;border-radius:9px;background:#f7f1f0;color:#a86661}.delete-note svg{width:17px;height:17px}
+.close-dialog{display:grid;place-items:center;padding:0}.close-dialog svg{width:18px;height:18px}
+@media(hover:hover) and (pointer:fine){.swipe-row:hover .note-card{transform:translateX(-82px)}}
+@media(min-width:721px){.list-page,.detail,.settings-page{min-height:calc(100vh - 72px);padding-top:24px}}
+
+/* Match the assets app configuration sheet. */
+.modal-backdrop{background:#0d251b96}
+.sync-dialog{width:min(100%,560px);max-height:92dvh;padding:23px 20px calc(24px + env(safe-area-inset-bottom));box-shadow:none}
+.dialog-heading{align-items:center;margin-bottom:15px}
+.dialog-heading h2{margin:0;font-size:20px}
+.close-dialog{width:32px;height:32px;background:#f1f4ef;color:#6b8473;font-size:22px}
+.repo-name{margin:0 0 15px;color:#899a8d;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.field{display:block;margin:15px 0;color:#526a5c;font-size:12px;font-weight:700}
+.field input{display:block;width:100%;height:44px;margin-top:7px;padding:0 12px;border:1px solid #dce8df;border-radius:10px;outline-color:#338663;background:#fbfcfa;color:#20382a;font-size:16px}
+.clear-credentials{margin:-5px 0 12px auto;color:#84988a;font-size:11px}
+.read-cloud{margin-top:7px;border-radius:11px;background:#1c604b}
+@media(min-width:600px){.sync-dialog{max-height:88dvh;border-radius:22px}}
