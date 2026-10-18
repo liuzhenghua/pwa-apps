@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { captionFonts, clampAdjustment, defaultAdjustment, defaultCaption, defaultMargins, drawAdjusted, getLayout, initialFrames, renderLayout, templates, type Caption, type Frame, type Margins, type PhotoAdjustment, type Rect, type TemplateId } from './render-layout';
+import { captionFonts, clampAdjustment, defaultAdjustment, defaultCaption, defaultMargins, drawAdjusted, getLayout, initialFrames, renderLayout, templates, type Caption, type Frame, type Margins, type PhotoAdjustment, type PhotoFit, type Rect, type TemplateId } from './render-layout';
 import { TEXT_POOL } from './text-pool';
 import './style.css';
 
@@ -17,7 +17,7 @@ function TemplateArt({ template }: { template: TemplateId }) {
   </svg>;
 }
 
-function CropDialog({ fileUrl, rect, initial, onCancel, onSave }: { fileUrl: string; rect: Rect; initial: PhotoAdjustment; onCancel: () => void; onSave: (adjustment: PhotoAdjustment) => void }) {
+function CropDialog({ fileUrl, rect, fit = 'cover', initial, onCancel, onSave }: { fileUrl: string; rect: Rect; fit?: PhotoFit; initial: PhotoAdjustment; onCancel: () => void; onSave: (adjustment: PhotoAdjustment) => void }) {
   const [draft, setDraft] = useState(initial);
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const [imageReady, setImageReady] = useState(0);
@@ -27,7 +27,7 @@ function CropDialog({ fileUrl, rect, initial, onCancel, onSave }: { fileUrl: str
   const scale = Math.min(1, Math.min(viewport.width - 32, 480) / rect.w, Math.min(viewport.height * .48, 500) / rect.h);
   const previewWidth = rect.w * scale;
   const previewHeight = rect.h * scale;
-  const constrainDraft = (adjustment: PhotoAdjustment) => imageRef.current ? clampAdjustment(imageRef.current, rect, adjustment) : adjustment;
+  const constrainDraft = (adjustment: PhotoAdjustment) => imageRef.current ? clampAdjustment(imageRef.current, rect, adjustment, fit) : adjustment;
 
   useEffect(() => {
     const onResize = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
@@ -56,8 +56,8 @@ function CropDialog({ fileUrl, rect, initial, onCancel, onSave }: { fileUrl: str
     const context = canvas.getContext('2d');
     if (!context) return;
     context.scale(scale * ratio, scale * ratio);
-    drawAdjusted(context, image, { x: 0, y: 0, w: rect.w, h: rect.h }, draft);
-  }, [draft, imageReady, previewWidth, previewHeight, rect.w, rect.h, scale]);
+    drawAdjusted(context, image, { x: 0, y: 0, w: rect.w, h: rect.h }, draft, fit);
+  }, [draft, fit, imageReady, previewWidth, previewHeight, rect.w, rect.h, scale]);
 
   return <div className="crop-dialog" role="dialog" aria-modal="true" aria-label="裁剪照片">
     <header className="crop-dialog-header"><button type="button" onClick={onCancel}>取消</button><strong>裁剪照片</strong><button type="button" className="crop-confirm" onClick={() => onSave(constrainDraft(draft))}>确认</button></header>
@@ -301,7 +301,15 @@ function App() {
     <div className="actions"><button type="button" className="share-button" disabled={!complete} onClick={share}>分享图片</button><button type="button" className="save-button" disabled={!complete} onClick={download}>保存 JPG</button></div>
     <p className="hint">填满所有位置后即可导出。分享会打开系统面板，能否选微信取决于设备和浏览器。</p>
     {message && <p className="status" role="status">{message}</p>}
-    {cropTarget !== null && slotFiles[cropTarget] && fileUrls[cropTarget] && <CropDialog key={cropTarget} fileUrl={fileUrls[cropTarget]!} rect={template === 'id-photo' ? { x: 0, y: 0, w: 368, h: 480 } : layout.slots[cropTarget].rect} initial={adjustments[cropTarget]} onCancel={() => setCropTarget(null)} onSave={draft => { updateAdjustment(cropTarget, draft); setCropTarget(null); }}/>}
+    {cropTarget !== null && slotFiles[cropTarget] && fileUrls[cropTarget] && <CropDialog
+      key={cropTarget}
+      fileUrl={fileUrls[cropTarget]!}
+      rect={template === 'id-photo' ? { x: 0, y: 0, w: 368, h: 480 } : layout.slots[cropTarget].rect}
+      fit={template === 'normal-2' ? 'contain' : 'cover'}
+      initial={adjustments[cropTarget]}
+      onCancel={() => setCropTarget(null)}
+      onSave={draft => { updateAdjustment(cropTarget, draft); setCropTarget(null); }}
+    />}
   </main>;
 }
 

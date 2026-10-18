@@ -13,13 +13,14 @@ export type Rect = { x: number; y: number; w: number; h: number };
 export type Frame = Rect & { rotation: number };
 export type Margins = { horizontal: number; vertical: number; captionSpace?: number };
 export function defaultMargins(template: TemplateId): Margins {
-  if (template === 'normal-2') return { horizontal: 52, vertical: 52 };
+  if (template === 'normal-2') return { horizontal: 52, vertical: 80 };
   if (template === 'normal-4') return { horizontal: 40, vertical: 64 };
   if (template === 'polaroid-1') return { horizontal: 46, vertical: 62, captionSpace: 300 };
   if (template === 'polaroid-2') return { horizontal: 72, vertical: 48, captionSpace: 200 };
   return { horizontal: 0, vertical: 0 };
 }
 export type PhotoAdjustment = { zoom: number; offsetX: number; offsetY: number; rotation: number };
+export type PhotoFit = 'cover' | 'contain';
 export const defaultAdjustment = (): PhotoAdjustment => ({ zoom: 1, offsetX: 0, offsetY: 0, rotation: 0 });
 export const captionFonts = [
   { label: '马善政', value: 'Ma Shan Zheng', fallback: 'cursive' },
@@ -100,18 +101,21 @@ function loadImage(file: File): Promise<HTMLImageElement> {
   });
 }
 
-function adjustedTransform(image: HTMLImageElement, rect: Rect, adjustment: PhotoAdjustment) {
+function adjustedTransform(image: HTMLImageElement, rect: Rect, adjustment: PhotoAdjustment, fit: PhotoFit = 'cover') {
   const angle = adjustment.rotation * Math.PI / 180;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   const absCos = Math.abs(cos);
   const absSin = Math.abs(sin);
   const cover = Math.max(rect.w / image.naturalWidth, rect.h / image.naturalHeight);
+  const contain = Math.min(rect.w / image.naturalWidth, rect.h / image.naturalHeight);
   const rotatedCover = Math.max(
     (absCos * rect.w + absSin * rect.h) / image.naturalWidth,
     (absSin * rect.w + absCos * rect.h) / image.naturalHeight,
   );
-  const scale = Math.max(cover * adjustment.zoom, rotatedCover);
+  const scale = fit === 'contain'
+    ? contain * adjustment.zoom
+    : Math.max(cover * adjustment.zoom, rotatedCover);
   const requestedX = adjustment.offsetX * rect.w;
   const requestedY = adjustment.offsetY * rect.h;
   const maxLocalX = Math.max(0, (image.naturalWidth * scale - absCos * rect.w - absSin * rect.h) / 2);
@@ -123,13 +127,13 @@ function adjustedTransform(image: HTMLImageElement, rect: Rect, adjustment: Phot
   return { angle, scale, dx, dy };
 }
 
-export function clampAdjustment(image: HTMLImageElement, rect: Rect, adjustment: PhotoAdjustment): PhotoAdjustment {
-  const { dx, dy } = adjustedTransform(image, rect, adjustment);
+export function clampAdjustment(image: HTMLImageElement, rect: Rect, adjustment: PhotoAdjustment, fit: PhotoFit = 'cover'): PhotoAdjustment {
+  const { dx, dy } = adjustedTransform(image, rect, adjustment, fit);
   return { ...adjustment, offsetX: dx / rect.w, offsetY: dy / rect.h };
 }
 
-export function drawAdjusted(ctx: CanvasRenderingContext2D, image: HTMLImageElement, rect: Rect, adjustment = defaultAdjustment()) {
-  const { angle, scale, dx, dy } = adjustedTransform(image, rect, adjustment);
+export function drawAdjusted(ctx: CanvasRenderingContext2D, image: HTMLImageElement, rect: Rect, adjustment = defaultAdjustment(), fit: PhotoFit = 'cover') {
+  const { angle, scale, dx, dy } = adjustedTransform(image, rect, adjustment, fit);
   ctx.save();
   ctx.beginPath();
   ctx.rect(rect.x, rect.y, rect.w, rect.h);
@@ -229,7 +233,7 @@ export async function renderLayout(files: (File | null)[], template: TemplateId,
     cells.forEach(rect => source ? drawAdjusted(ctx, source, rect, adjustments[0]) : drawEmpty(ctx, rect, '照片'));
   } else {
     layout.slots.forEach((slot, i) => {
-      images[i] ? drawAdjusted(ctx, images[i], slot.rect, adjustments[i]) : drawEmpty(ctx, slot.rect, slot.label);
+      images[i] ? drawAdjusted(ctx, images[i], slot.rect, adjustments[i], template === 'normal-2' ? 'contain' : 'cover') : drawEmpty(ctx, slot.rect, slot.label);
       if (template.startsWith('polaroid-')) drawCaption(ctx, template, slot.rect, captions[i] ?? defaultCaption(i));
     });
   }
