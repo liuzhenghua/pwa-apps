@@ -1,6 +1,6 @@
 import { createEncryption, decryptNote, encryptNote, unlockEncryption, type CryptoMetadata, type EncryptedNote } from './crypto.ts';
 
-export type Note = { id: string; title: string; body: string; updated: number };
+export type Note = { id: string; title: string; body: string; updated: number; created?: number; categoryId?: string; categoryName?: string; pinned?: boolean; deletedAt?: number | null };
 export const storageRepository = 'liuzhenghua/pwa-apps-data';
 export type RemoteEntry = { name: string; sha: string };
 export type RemoteNotes = { notes: Note[]; shas: Record<string, string>; key?: CryptoKey; encrypted: boolean; fingerprint: string };
@@ -15,21 +15,20 @@ export function mergeNotes(local: Note[], cloud: Note[], baseline: Note[] | null
   const baseById = new Map((baseline || []).map(note => [note.id, note]));
   const merged: Note[] = [];
   const conflicts: string[] = [];
-  const same = (a: Note, b: Note) => a.title === b.title && a.body === b.body && a.updated === b.updated;
-
+  const same = (a: Note, b: Note) => JSON.stringify(a) === JSON.stringify(b);
   for (const id of new Set([...localById.keys(), ...cloudById.keys()])) {
-    const a = localById.get(id);
-    const b = cloudById.get(id);
-    const previous = baseById.get(id);
+    const a = localById.get(id), b = cloudById.get(id), previous = baseById.get(id);
     if (a && b) {
       if (same(a, b)) merged.push(a);
-      else if (a.updated !== b.updated) merged.push(a.updated > b.updated ? a : b);
-      else conflicts.push(a.title || b.title || '无标题');
+      else if (previous && same(a, previous)) merged.push(b);
+      else if (previous && same(b, previous)) merged.push(a);
+      else {
+        merged.push(a, { ...b, id: crypto.randomUUID(), title: `${b.title || '无标题'}（冲突副本）`, deletedAt: null, updated: Date.now() });
+        conflicts.push(a.title || '无标题');
+      }
     } else if (a || b) {
       const existing = (a || b)!;
-      if (!previous) merged.push(existing); // New on one side.
-      else if (!same(existing, previous)) conflicts.push(existing.title || '无标题'); // Edited versus deleted.
-      // Otherwise the missing side intentionally deleted an unchanged note.
+      if (!previous || !same(existing, previous)) merged.push(existing);
     }
   }
   return { notes: merged, conflicts };
@@ -141,7 +140,7 @@ export async function putRemote(folder: string, token: string, secret: string, n
   // GitHub's Contents API creates one commit per request; run writes serially.
   for (const note of notes) {
     const old = remoteById.get(note.id);
-    if (old && old.title === note.title && old.body === note.body && old.updated === note.updated) continue;
+    if (old && JSON.stringify(old) === JSON.stringify(note)) continue;
     const response = await fetch(fileUrl(folder, note.id), {
       method: 'PUT',
       headers: { ...headers(token), 'Content-Type': 'application/json' },
