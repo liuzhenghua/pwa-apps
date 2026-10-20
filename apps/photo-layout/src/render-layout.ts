@@ -91,14 +91,36 @@ export function getLayout(template: TemplateId, frames = initialFrames(template)
   return { width, height, slots: [{ label: '证件照原图', rect: { x: 65, y: 95, w: 1670, h: 1000 } }] };
 }
 
-function loadImage(file: File): Promise<HTMLImageElement> {
+function loadImageSource(source: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
     const image = new Image();
-    image.onload = () => { URL.revokeObjectURL(url); resolve(image); };
-    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('无法读取照片')); };
-    image.src = url;
+    image.onload = () => {
+      const decoded = typeof image.decode === 'function' ? image.decode() : Promise.resolve();
+      void decoded.catch(() => undefined).then(() => resolve(image));
+    };
+    image.onerror = () => reject(new Error('无法读取照片'));
+    image.src = source;
   });
+}
+
+async function loadImage(file: Blob): Promise<HTMLImageElement> {
+  if (!file.size) throw new Error('照片数据为空，请重新选择照片');
+  const url = URL.createObjectURL(file);
+  try {
+    return await loadImageSource(url);
+  } catch {
+    // Some mobile WebViews intermittently fail to decode IndexedDB-backed blob URLs.
+    // A data URL fallback lets the same saved bytes load without asking the user to reselect.
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error('照片数据读取失败，请重新选择照片'));
+      reader.readAsDataURL(file);
+    });
+    return await loadImageSource(dataUrl);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function adjustedTransform(image: HTMLImageElement, rect: Rect, adjustment: PhotoAdjustment, fit: PhotoFit = 'cover') {
@@ -181,7 +203,7 @@ function drawCaption(ctx: CanvasRenderingContext2D, template: TemplateId, rect: 
   ctx.restore();
 }
 
-export async function renderLayout(files: (File | null)[], template: TemplateId, frames = initialFrames(template), adjustments: PhotoAdjustment[] = [], quality = 2, captions: Caption[] = [], margins = defaultMargins(template)): Promise<Blob> {
+export async function renderLayout(files: (Blob | null)[], template: TemplateId, frames = initialFrames(template), adjustments: PhotoAdjustment[] = [], quality = 2, captions: Caption[] = [], margins = defaultMargins(template)): Promise<Blob> {
   const layout = getLayout(template, frames, margins);
   if (template.startsWith('polaroid-')) {
     const usedFonts = captions.flatMap(caption => [caption.font1, caption.line2Enabled ? caption.font2 : '']).filter(Boolean);

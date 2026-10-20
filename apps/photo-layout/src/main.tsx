@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Images, Settings } from 'lucide-react';
 import { captionFonts, clampAdjustment, defaultAdjustment, defaultCaption, defaultMargins, drawAdjusted, getLayout, initialFrames, renderLayout, templates, type Caption, type Frame, type Margins, type PhotoAdjustment, type PhotoFit, type Rect, type TemplateId } from './render-layout';
 import { TEXT_POOL } from './text-pool';
-import { readProjects, removeProject, writeProject, type PhotoProject } from './storage';
+import { readProject, readProjects, removeProject, writeProject, type PhotoProject } from './storage';
 import './style.css';
 
 type FrameDrag = { index: number; mode: 'move' | 'resize'; startX: number; startY: number; start: Frame; moved: boolean };
@@ -96,7 +96,7 @@ function App() {
   const [renameValue, setRenameValue] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [template, setTemplate] = useState<TemplateId | null>(null);
-  const [slotFiles, setSlotFiles] = useState<(File | null)[]>([]);
+  const [slotFiles, setSlotFiles] = useState<(Blob | null)[]>([]);
   const [frames, setFrames] = useState<Frame[]>([]);
   const [adjustments, setAdjustments] = useState<PhotoAdjustment[]>([]);
   const [captions, setCaptions] = useState<Caption[]>([]);
@@ -204,10 +204,18 @@ function App() {
   }
 
   async function continueProject(project: PhotoProject) {
-    setActiveProjectId(project.id); setProjectName(project.name); setTemplate(project.template);
-    setFrames(project.frames); setAdjustments(project.adjustments); setCaptions(project.captions); setMargins(project.margins); setQuality(project.quality);
-    setSlotFiles(project.assets.map((blob, i) => blob ? new File([blob], `photo-${i + 1}`, { type: blob.type || 'image/jpeg' }) : null));
-    setSelectedSlot(project.template.startsWith('polaroid-') ? 0 : null); setResult(null); setMessage(''); setPage('editor');
+    try {
+      // Rehydrate the durable record each time instead of reusing potentially stale
+      // Blob handles retained in React state after leaving the editor.
+      const current = await readProject(project.id) ?? project;
+      setProjects(items => [current, ...items.filter(item => item.id !== current.id)].sort((a, b) => b.updatedAt - a.updatedAt));
+      setActiveProjectId(current.id); setProjectName(current.name); setTemplate(current.template);
+      setFrames(current.frames); setAdjustments(current.adjustments); setCaptions(current.captions); setMargins(current.margins); setQuality(current.quality);
+      setSlotFiles(current.assets.map(blob => blob));
+      setSelectedSlot(current.template.startsWith('polaroid-') ? 0 : null); setResult(null); setMessage(''); setPreviewError(false); setPage('editor');
+    } catch {
+      setMessage('无法读取本地作品，请重新打开页面后重试。');
+    }
   }
 
   async function cloneProject(project: PhotoProject) {

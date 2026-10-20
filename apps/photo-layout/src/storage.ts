@@ -23,6 +23,14 @@ export async function readProjects(): Promise<PhotoProject[]> {
     request.onerror = () => reject(request.error);
   });
 }
+export async function readProject(id: string): Promise<PhotoProject | undefined> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction('projects').objectStore('projects').get(id);
+    request.onsuccess = () => resolve(request.result as PhotoProject | undefined);
+    request.onerror = () => reject(request.error);
+  });
+}
 export async function writeProject(project: PhotoProject): Promise<void> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
