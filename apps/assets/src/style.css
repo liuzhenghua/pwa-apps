@@ -388,7 +388,7 @@ main {
   left: 50%;
   transform: translateX(-50%);
   width: min(100%, 560px);
-  height: calc(70px + env(safe-area-inset-bottom));
+  height: calc(72px + env(safe-area-inset-bottom));
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   padding-bottom: env(safe-area-inset-bottom);

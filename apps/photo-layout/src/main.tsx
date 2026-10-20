@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { Images, Settings } from 'lucide-react';
 import { captionFonts, clampAdjustment, defaultAdjustment, defaultCaption, defaultMargins, drawAdjusted, getLayout, initialFrames, renderLayout, templates, type Caption, type Frame, type Margins, type PhotoAdjustment, type PhotoFit, type Rect, type TemplateId } from './render-layout';
 import { TEXT_POOL } from './text-pool';
 import { readProjects, removeProject, writeProject, type PhotoProject } from './storage';
@@ -385,7 +386,7 @@ function App() {
           {renameId && <div className="rename-backdrop"><section className="rename-dialog"><strong>重命名作品</strong><input autoFocus value={renameValue} onChange={event => setRenameValue(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void saveRename(); }}/><div><button onClick={() => setRenameId(null)}>取消</button><button className="confirm" onClick={() => void saveRename()}>保存</button></div></section></div>}
         </>}
       </main>
-      <nav className="bottom-nav"><button className={page !== 'settings' ? 'active' : ''} onClick={() => setPage('works')}><span>▦</span>作品</button><button className={page === 'settings' ? 'active' : ''} onClick={() => setPage('settings')}><span>⚙</span>设置</button></nav>
+      <nav className="bottom-nav"><button className={page !== 'settings' ? 'active' : ''} onClick={() => setPage('works')}><Images aria-hidden="true" strokeWidth={1.8}/>作品</button><button className={page === 'settings' ? 'active' : ''} onClick={() => setPage('settings')}><Settings aria-hidden="true" strokeWidth={1.8}/>设置</button></nav>
     </>;
   }
 
