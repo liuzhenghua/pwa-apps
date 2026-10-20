@@ -108,6 +108,7 @@ function App() {
   const [result, setResult] = useState<{ blob: Blob; url: string } | null>(null);
   const [fileUrls, setFileUrls] = useState<(string | null)[]>([]);
   const [busy, setBusy] = useState(false);
+  const [previewError, setPreviewError] = useState(false);
   const [message, setMessage] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const backupInputRef = useRef<HTMLInputElement>(null);
@@ -129,16 +130,32 @@ function App() {
   useEffect(() => () => { if (result?.url) URL.revokeObjectURL(result.url); }, [result?.url]);
 
   useEffect(() => {
-    if (!template) return;
+    if (!template || page !== 'editor') return;
     let cancelled = false;
     setBusy(true);
+    setPreviewError(false);
     const timer = window.setTimeout(() => {
-      renderLayout(slotFiles, template, frames, adjustments, quality, captions, margins).then(blob => {
-        if (cancelled) return;
-        setResult({ blob, url: URL.createObjectURL(blob) });
-      }).catch(() => {
-        if (!cancelled) { setResult(null); setMessage('照片处理失败，请重新选择这张照片。'); }
-      }).finally(() => {
+      void (async () => {
+        let lastError: unknown;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            const blob = await renderLayout(slotFiles, template, frames, adjustments, quality, captions, margins);
+            if (cancelled) return;
+            setResult({ blob, url: URL.createObjectURL(blob) });
+            setMessage('');
+            return;
+          } catch (error) {
+            lastError = error;
+            if (cancelled || attempt === 1) break;
+            await new Promise(resolve => window.setTimeout(resolve, 180));
+          }
+        }
+        if (!cancelled) {
+          setResult(null);
+          setPreviewError(true);
+          setMessage(lastError instanceof Error ? lastError.message : '照片处理失败，请重新选择这张照片。');
+        }
+      })().finally(() => {
         if (!cancelled) setBusy(false);
       });
     }, 80);
@@ -146,7 +163,7 @@ function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [slotFiles, template, frames, adjustments, quality, captions, margins]);
+  }, [page, slotFiles, template, frames, adjustments, quality, captions, margins]);
 
   useEffect(() => {
     if (!loaded || !template || !activeProjectId) return;
@@ -402,7 +419,7 @@ function App() {
     <header className="editor-header"><button className="back-button" type="button" onClick={async () => { await flushCurrentProject(); setPage('works'); setTemplate(null); }} aria-label="返回作品">‹ <span>作品</span></button><input className="project-title-input" aria-label="作品名称" value={projectName || projects.find(item => item.id === activeProjectId)?.name || `${selectedTemplate.name}作品`} onChange={event => setProjectName(event.target.value)} /><span className="autosave-label">自动保存</span></header>
     <p className="editor-tip">{pip ? '点击背景或相框添加照片；拖动相框移动位置，拖右下角调整大小。' : '点击画面中的位置，选择或更换对应照片。'}</p>
     <div className="canvas-wrap"><div ref={canvasRef} className={`layout-canvas ${pip ? 'pip-canvas' : ''} ${polaroid ? 'polaroid-canvas' : ''} ${pip && result ? 'rendered-preview' : ''}`} style={{ aspectRatio: `${layout.width} / ${layout.height}` }}>
-      {pip ? result && <img src={result.url} alt={`${selectedTemplate.name}排版预览`}/> : result ? <img src={result.url} alt={`${selectedTemplate.name}排版预览`}/> : <div className="render-loading">{busy ? '正在生成预览…' : '预览暂不可用'}</div>}
+      {pip ? result && <img src={result.url} alt={`${selectedTemplate.name}排版预览`}/> : result ? <img src={result.url} alt={`${selectedTemplate.name}排版预览`}/> : <div className="render-loading">{busy ? '正在生成预览…' : previewError ? '预览生成失败，请重新选择照片' : '等待生成预览…'}</div>}
       {layout.slots.map((slot, index) => <button key={index} type="button" className={`slot-target ${slotFiles[index] ? 'filled' : 'empty-slot'} ${selectedSlot === index ? 'active-slot' : ''} ${pip && index > 0 ? 'movable-slot pip-frame' : ''} ${pip && index === 0 ? 'pip-background' : ''}`} style={{ left: `${slot.rect.x / layout.width * 100}%`, top: `${slot.rect.y / layout.height * 100}%`, width: `${slot.rect.w / layout.width * 100}%`, height: `${slot.rect.h / layout.height * 100}%`, transform: slot.rotation ? `rotate(${slot.rotation}deg)` : undefined }} aria-label={`${slotFiles[index] ? '选择' : '添加'}${slot.label}`} title={slot.label} onClick={() => onSlotClick(index)} onPointerDown={event => onFramePointerDown(event, index)} onPointerMove={event => onFramePointerMove(event, layout.width, layout.height)} onPointerUp={onFramePointerUp} onPointerCancel={onFramePointerUp}>
         {pip && <span className="pip-photo-area">{fileUrls[index] ? <img src={fileUrls[index]!} alt="" draggable={false} style={{ transform: `translate(${(adjustments[index]?.offsetX ?? 0) * 100}%, ${(adjustments[index]?.offsetY ?? 0) * 100}%) rotate(${adjustments[index]?.rotation ?? 0}deg) scale(${adjustments[index]?.zoom ?? 1})` }}/> : index === 0 ? <span className="pip-placeholder"><span className="photo-symbol" aria-hidden="true">▧</span>点击上传{template === 'pip-horizontal' ? '横版' : '竖版'}背景</span> : null}</span>}
         {!pip && <span className="edit-mark" aria-hidden="true">✎</span>}{pip && index > 0 && <span className="frame-resizer" aria-hidden="true"/>}
