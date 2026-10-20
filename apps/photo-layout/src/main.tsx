@@ -31,11 +31,52 @@ function CropDialog({ fileUrl, rect, fit = 'cover', initial, onCancel, onSave }:
   const [imageReady, setImageReady] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
-  const dragRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const draftRef = useRef(initial);
   const scale = Math.min(1, Math.min(viewport.width - 32, 480) / rect.w, Math.min(viewport.height * .48, 500) / rect.h);
   const previewWidth = rect.w * scale;
   const previewHeight = rect.h * scale;
   const constrainDraft = (adjustment: PhotoAdjustment) => imageRef.current ? clampAdjustment(imageRef.current, rect, adjustment, fit) : adjustment;
+
+  function updateDraft(next: PhotoAdjustment) {
+    const constrained = constrainDraft(next);
+    draftRef.current = constrained;
+    setDraft(constrained);
+  }
+
+  function movePointer(event: React.PointerEvent<HTMLCanvasElement>) {
+    const pointers = pointersRef.current;
+    if (!pointers.has(event.pointerId)) return;
+    const before = [...pointers.values()];
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const after = [...pointers.values()];
+    const current = draftRef.current;
+    if (before.length === 1) {
+      updateDraft({ ...current,
+        offsetX: current.offsetX + (after[0].x - before[0].x) / previewWidth,
+        offsetY: current.offsetY + (after[0].y - before[0].y) / previewHeight });
+      return;
+    }
+    if (before.length !== 2) return;
+    const distance = (points: { x: number; y: number }[]) => Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y);
+    if (distance(before) < 1) return;
+    const zoom = Math.max(1, Math.min(3, current.zoom * distance(after) / distance(before)));
+    const ratio = zoom / current.zoom;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const centerX = bounds.left + bounds.width / 2;
+    const centerY = bounds.top + bounds.height / 2;
+    const beforeX = (before[0].x + before[1].x) / 2 - centerX;
+    const beforeY = (before[0].y + before[1].y) / 2 - centerY;
+    const afterX = (after[0].x + after[1].x) / 2 - centerX;
+    const afterY = (after[0].y + after[1].y) / 2 - centerY;
+    updateDraft({ ...current, zoom,
+      offsetX: (afterX - (beforeX - current.offsetX * previewWidth) * ratio) / previewWidth,
+      offsetY: (afterY - (beforeY - current.offsetY * previewHeight) * ratio) / previewHeight });
+  }
+
+  function endPointer(event: React.PointerEvent<HTMLCanvasElement>) {
+    pointersRef.current.delete(event.pointerId);
+  }
 
   useEffect(() => {
     const onResize = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
@@ -69,8 +110,14 @@ function CropDialog({ fileUrl, rect, fit = 'cover', initial, onCancel, onSave }:
 
   return <div className="crop-dialog" role="dialog" aria-modal="true" aria-label="裁剪照片">
     <header className="crop-dialog-header"><button type="button" onClick={onCancel}>取消</button><strong>裁剪照片</strong><button type="button" className="crop-confirm" onClick={() => onSave(constrainDraft(draft))}>确认</button></header>
-    <div className="crop-dialog-stage"><canvas ref={canvasRef} width={previewWidth} height={previewHeight} style={{ width: previewWidth, height: previewHeight }} aria-label="拖动调整照片位置" onPointerDown={event => { const current = constrainDraft(draft); dragRef.current = { x: event.clientX, y: event.clientY, offsetX: current.offsetX, offsetY: current.offsetY }; event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={event => { const drag = dragRef.current; if (!drag) return; const next = constrainDraft({ ...draft, offsetX: drag.offsetX + (event.clientX - drag.x) / previewWidth, offsetY: drag.offsetY + (event.clientY - drag.y) / previewHeight }); dragRef.current = { x: event.clientX, y: event.clientY, offsetX: next.offsetX, offsetY: next.offsetY }; setDraft(next); }} onPointerUp={() => { dragRef.current = null; }} onPointerCancel={() => { dragRef.current = null; }}/></div>
-    <div className="crop-dialog-controls"><p>拖动照片调整位置</p><label>缩放 <input type="range" min="1" max="3" step="0.01" value={draft.zoom} onChange={event => setDraft(current => constrainDraft({ ...current, zoom: Number(event.target.value) }))}/><span>{draft.zoom.toFixed(2)}×</span></label><label>旋转 <input type="range" min="-180" max="180" step="1" value={draft.rotation} onChange={event => setDraft(current => constrainDraft({ ...current, rotation: Number(event.target.value) }))}/><span>{draft.rotation}°</span></label><button type="button" className="crop-reset" onClick={() => setDraft(defaultAdjustment())}>重置</button></div>
+    <div className="crop-dialog-stage"><canvas ref={canvasRef} width={previewWidth} height={previewHeight} style={{ width: previewWidth, height: previewHeight }} aria-label="单指拖动照片，双指缩放" onPointerDown={event => {
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      event.preventDefault();
+      if (pointersRef.current.size >= 2) return;
+      pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }} onPointerMove={movePointer} onPointerUp={endPointer} onPointerCancel={endPointer} onLostPointerCapture={endPointer}/></div>
+    <div className="crop-dialog-controls"><p>单指拖动调整位置，双指捏合缩放</p><label>缩放 <input type="range" min="1" max="3" step="0.01" value={draft.zoom} onChange={event => updateDraft({ ...draftRef.current, zoom: Number(event.target.value) })}/><span>{draft.zoom.toFixed(2)}×</span></label><label>旋转 <input type="range" min="-180" max="180" step="1" value={draft.rotation} onChange={event => updateDraft({ ...draftRef.current, rotation: Number(event.target.value) })}/><span>{draft.rotation}°</span></label><button type="button" className="crop-reset" onClick={() => updateDraft(defaultAdjustment())}>重置</button></div>
   </div>;
 }
 
