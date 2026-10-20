@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { captionFonts, clampAdjustment, defaultAdjustment, defaultCaption, defaultMargins, drawAdjusted, getLayout, initialFrames, renderLayout, templates, type Caption, type Frame, type Margins, type PhotoAdjustment, type PhotoFit, type Rect, type TemplateId } from './render-layout';
 import { TEXT_POOL } from './text-pool';
+import { readProjects, removeProject, writeProject, type PhotoProject } from './storage';
 import './style.css';
 
 type FrameDrag = { index: number; mode: 'move' | 'resize'; startX: number; startY: number; start: Frame; moved: boolean };
@@ -15,6 +16,12 @@ function TemplateArt({ template }: { template: TemplateId }) {
     <text x={layout.width / 2} y={layout.height / 2 + 100} textAnchor="middle" fill="#cbd5e1" fontSize="42" fontWeight="700">点击上传背景</text>
     {initialFrames(template).map((frame, index) => <g key={index} transform={`rotate(${frame.rotation} ${frame.x + frame.w / 2} ${frame.y + frame.h / 2})`}><rect x={frame.x - 7} y={frame.y - 7} width={frame.w + 14} height={frame.h + 14} fill="#fff"/><rect x={frame.x} y={frame.y} width={frame.w} height={frame.h} fill="#dfe6ed"/></g>)}
   </svg>;
+}
+
+function ProjectThumb({ blob, template }: { blob?: Blob; template: TemplateId }) {
+  const [url, setUrl] = useState('');
+  useEffect(() => { if (!blob) { setUrl(''); return; } const next = URL.createObjectURL(blob); setUrl(next); return () => URL.revokeObjectURL(next); }, [blob]);
+  return <div className="project-thumb">{url ? <img src={url} alt="作品预览"/> : <TemplateArt template={template}/>}</div>;
 }
 
 function CropDialog({ fileUrl, rect, fit = 'cover', initial, onCancel, onSave }: { fileUrl: string; rect: Rect; fit?: PhotoFit; initial: PhotoAdjustment; onCancel: () => void; onSave: (adjustment: PhotoAdjustment) => void }) {
@@ -78,6 +85,15 @@ function MarginControls({ template, margins, onChange }: { template: TemplateId;
 }
 
 function App() {
+  const [page, setPage] = useState<'works' | 'templates' | 'editor' | 'settings'>('works');
+  const [projects, setProjects] = useState<PhotoProject[]>([]);
+  const [filter, setFilter] = useState<'all' | 'draft' | 'exported'>('all');
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState('');
+  const [storageUsage, setStorageUsage] = useState<{usage?: number; quota?: number}>({});
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [loaded, setLoaded] = useState(false);
   const [template, setTemplate] = useState<TemplateId | null>(null);
   const [slotFiles, setSlotFiles] = useState<(File | null)[]>([]);
   const [frames, setFrames] = useState<Frame[]>([]);
@@ -93,10 +109,15 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const backupInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const activeSlot = useRef(0);
   const frameDrag = useRef<FrameDrag | null>(null);
   const suppressClick = useRef(false);
+
+  useEffect(() => { readProjects().then(items => { setProjects(items); setLoaded(true); }).catch(() => setLoaded(true)); }, []);
+  useEffect(() => { navigator.storage?.estimate?.().then(value => setStorageUsage(value)).catch(() => {}); }, [page]);
+  useEffect(() => { window.scrollTo({ top: 0, behavior: 'auto' }); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; }, [page]);
 
   useEffect(() => {
     const urls = slotFiles.map(file => file ? URL.createObjectURL(file) : null);
@@ -126,19 +147,99 @@ function App() {
     };
   }, [slotFiles, template, frames, adjustments, quality, captions, margins]);
 
+  useEffect(() => {
+    if (!loaded || !template || !activeProjectId) return;
+    const timer = window.setTimeout(async () => {
+      const prior = projects.find(item => item.id === activeProjectId);
+      const record: PhotoProject = { id: activeProjectId, name: projectName || prior?.name || '未命名作品', template,
+        createdAt: prior?.createdAt ?? Date.now(), updatedAt: Date.now(), lastExportedAt: prior?.lastExportedAt,
+        frames, adjustments, captions, margins, quality, assets: await Promise.all(slotFiles.map(async f => f ? f.slice(0, f.size, f.type) : null)), thumbnail: prior?.thumbnail };
+      try { await writeProject(record); setProjects(current => [record, ...current.filter(item => item.id !== record.id)].sort((a,b) => b.updatedAt-a.updatedAt)); }
+      catch { setMessage('本地保存失败，设备存储空间可能不足。'); }
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [loaded, template, activeProjectId, projectName, slotFiles, frames, adjustments, captions, margins, quality]);
+
   function openTemplate(next: TemplateId) {
     const count = getLayout(next).slots.length;
     setTemplate(next);
     setFrames(initialFrames(next));
     setSlotFiles(Array(count).fill(null));
     setAdjustments(Array.from({ length: count }, defaultAdjustment));
-    setCaptions(Array.from({ length: count }, (_, index) => defaultCaption(index)));
+    const nextCaptions = Array.from({ length: count }, (_, index) => defaultCaption(index));
+    if (next.startsWith('polaroid-')) {
+      const availablePhrases = [...TEXT_POOL];
+      for (const caption of nextCaptions) {
+        const phraseIndex = Math.floor(Math.random() * availablePhrases.length);
+        caption.line1 = availablePhrases.splice(phraseIndex, 1)[0];
+        caption.font1 = captionFonts[Math.floor(Math.random() * captionFonts.length)].value;
+      }
+    }
+    setCaptions(nextCaptions);
     setMargins(defaultMargins(next));
     setSelectedSlot(next.startsWith('polaroid-') ? 0 : null);
     setCropTarget(null);
     setMarginControlsOpen(false);
     setResult(null);
     setMessage('');
+    const id = crypto.randomUUID(); setActiveProjectId(id); setProjectName(`${templates.find(item => item.id === next)?.name ?? '照片拼图'}作品`); setPage('editor');
+  }
+
+  async function continueProject(project: PhotoProject) {
+    setActiveProjectId(project.id); setProjectName(project.name); setTemplate(project.template);
+    setFrames(project.frames); setAdjustments(project.adjustments); setCaptions(project.captions); setMargins(project.margins); setQuality(project.quality);
+    setSlotFiles(project.assets.map((blob, i) => blob ? new File([blob], `photo-${i + 1}`, { type: blob.type || 'image/jpeg' }) : null));
+    setSelectedSlot(project.template.startsWith('polaroid-') ? 0 : null); setResult(null); setMessage(''); setPage('editor');
+  }
+
+  async function cloneProject(project: PhotoProject) {
+    const clone = { ...project, id: crypto.randomUUID(), name: `${project.name} 副本`, createdAt: Date.now(), updatedAt: Date.now(), lastExportedAt: undefined };
+    await writeProject(clone); setProjects(current => [clone, ...current]);
+  }
+
+  async function deleteProject(project: PhotoProject) {
+    if (!window.confirm(`删除「${project.name}」？此操作会删除作品及其本地图片。`)) return;
+    await removeProject(project.id); setProjects(current => current.filter(item => item.id !== project.id));
+  }
+
+  async function saveRename() {
+    if (!renameId) return;
+    const project = projects.find(item => item.id === renameId); if (!project) return;
+    const updated = { ...project, name: renameValue.trim() || '未命名作品', updatedAt: Date.now() };
+    await writeProject(updated); setProjects(current => current.map(item => item.id === renameId ? updated : item)); setRenameId(null);
+  }
+
+  async function flushCurrentProject() {
+    if (!template || !activeProjectId) return;
+    const prior = projects.find(item => item.id === activeProjectId);
+    const record: PhotoProject = { id: activeProjectId, name: projectName || prior?.name || '未命名作品', template,
+      createdAt: prior?.createdAt ?? Date.now(), updatedAt: Date.now(), lastExportedAt: prior?.lastExportedAt,
+      frames, adjustments, captions, margins, quality, assets: await Promise.all(slotFiles.map(async f => f ? f.slice(0, f.size, f.type) : null)), thumbnail: prior?.thumbnail };
+    await writeProject(record);
+    setProjects(current => [record, ...current.filter(item => item.id !== record.id)].sort((a,b) => b.updatedAt-a.updatedAt));
+  }
+
+  async function exportLibrary() {
+    const toDataUrl = (blob?: Blob | null): Promise<string | null> => !blob ? Promise.resolve(null) : new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(blob); });
+    const payload = await Promise.all(projects.map(async project => ({ ...project, assets: await Promise.all(project.assets.map(toDataUrl)), thumbnail: await toDataUrl(project.thumbnail) })));
+    const url = URL.createObjectURL(new Blob([JSON.stringify({ version: 1, projects: payload })], { type: 'application/json' }));
+    const link = document.createElement('a'); link.href = url; link.download = `照片布局作品库-${new Date().toISOString().slice(0,10)}.json`; link.click(); URL.revokeObjectURL(url);
+  }
+
+  async function importLibrary(file?: File) {
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      if (parsed.version !== 1 || !Array.isArray(parsed.projects)) throw new Error('invalid backup');
+      const restored: PhotoProject[] = await Promise.all(parsed.projects.map(async (item: any) => {
+        if (!item || typeof item.id !== 'string' || typeof item.template !== 'string' || !Array.isArray(item.assets)) throw new Error('invalid project');
+        const assets = await Promise.all(item.assets.map(async (value: string | null) => value ? await (await fetch(value)).blob() : null));
+        const thumbnail = item.thumbnail ? await (await fetch(item.thumbnail)).blob() : undefined;
+        return { ...item, assets, thumbnail } as PhotoProject;
+      }));
+      for (const project of restored) await writeProject(project);
+      setProjects(await readProjects()); setMessage(`已恢复 ${restored.length} 个作品。`);
+    } catch { setMessage('备份文件无法读取，请选择照片布局导出的作品库文件。'); }
   }
 
   function chooseSlot(index: number) {
@@ -247,6 +348,7 @@ function App() {
     link.click();
     link.remove();
     setMessage('图片已生成。如未自动保存，请长按图片保存。');
+    if (activeProjectId) { const now = Date.now(); setProjects(current => { const updated = current.map(item => item.id === activeProjectId ? { ...item, lastExportedAt: now, updatedAt: now, thumbnail: result.blob } : item); const record = updated.find(item => item.id === activeProjectId); if (record) void writeProject(record); return updated; }); }
   }
 
   async function share() {
@@ -265,10 +367,27 @@ function App() {
     }
   }
 
-  if (!template) return <main className="app-shell home-page">
-    <header className="page-header"><p className="eyebrow">照片布局</p><h1>选择排版</h1><p className="intro">选一个 6 寸模板，再为画面中的每个位置添加照片。</p></header>
-    <div className="template-grid">{templates.map(item => <button key={item.id} type="button" className="template-card" onClick={() => openTemplate(item.id)}><span className="template-preview"><TemplateArt template={item.id}/></span><span className="template-copy"><strong>{item.name}</strong><small>{item.orientation} · 点击进入</small></span><span className="template-arrow" aria-hidden="true">›</span></button>)}</div>
-  </main>;
+  if (!template || page !== 'editor') {
+    const visibleProjects = projects.filter(item => filter === 'all' || (filter === 'draft' ? (!item.lastExportedAt || item.updatedAt > item.lastExportedAt) : !!item.lastExportedAt));
+    const bytes = storageUsage.usage ?? projects.reduce((sum, item) => sum + item.assets.reduce((n, asset) => n + (asset?.size ?? 0), 0), 0);
+    const formatBytes = (n: number) => n > 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : n > 1024 ** 2 ? `${(n / 1024 ** 2).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+    return <>
+      <header className="library-top"><span className="library-brand-icon" aria-hidden="true">▧</span><strong>照片布局</strong></header>
+      <main className="app-shell home-page">
+        {page === 'templates' ? <><header className="editor-header"><button className="back-button" type="button" onClick={() => setPage('works')}>‹ <span>作品</span></button><strong className="library-page-label">选择排版</strong></header><p className="intro template-intro">选一个模板开始新作品，创建后会自动保存为草稿。</p><div className="template-grid">{templates.map(item => <button key={item.id} type="button" className="template-card" onClick={() => openTemplate(item.id)}><span className="template-preview"><TemplateArt template={item.id}/></span><span className="template-copy"><strong>{item.name}</strong><small>{item.orientation} · 新建作品</small></span><span className="template-arrow" aria-hidden="true">›</span></button>)}</div></> : page === 'settings' ? <><div className="library-page-label settings-page-title">设置</div><p className="intro settings-intro">作品保存在此设备的浏览器中。</p><section className="settings-card"><span className="settings-icon">▧</span><div><strong>本地存储空间</strong><p>当前浏览器占用约 {formatBytes(bytes)}{storageUsage.quota ? ` / ${formatBytes(storageUsage.quota)}` : ''}</p></div></section><section className="settings-card"><span className="settings-icon">⇧</span><div><strong>手动备份与恢复</strong><p>打包作品、原始照片和编辑参数，方便迁移设备。</p><div className="settings-actions"><button onClick={() => void exportLibrary()}>导出作品库</button><button onClick={() => backupInputRef.current?.click()}>导入备份</button><input ref={backupInputRef} type="file" accept="application/json,.json" hidden onChange={event => { void importLibrary(event.target.files?.[0]); event.target.value = ''; }}/></div></div></section><section className="settings-card"><span className="settings-icon">⚙</span><div><strong>图片导出偏好</strong><p>默认导出为 JPG · 高清 450 DPI</p><button className="text-button" onClick={() => setQuality(value => value === 3 ? 1 : value + 1)}>切换默认画质</button></div></section><section className="settings-card"><span className="settings-icon">⌫</span><div><strong>草稿管理与缓存</strong><p>{projects.filter(item => !item.lastExportedAt).length} 个编辑中的作品</p><button className="text-button" onClick={async () => { const cleaned = projects.map(item => ({ ...item, thumbnail: undefined })); await Promise.all(cleaned.map(writeProject)); setProjects(cleaned); setMessage('已清理作品缩略图缓存。'); }}>清理缩略图缓存</button><button className="text-button danger-text" onClick={async () => { const drafts = projects.filter(item => !item.lastExportedAt); await Promise.all(drafts.map(item => removeProject(item.id))); setProjects(current => current.filter(item => !!item.lastExportedAt)); }}>清理所有草稿</button></div></section>{message && <p className="status" role="status">{message}</p>}</> : <>
+          <div className="library-page-label works-heading"><strong>我的作品</strong><span>{projects.length ? `共 ${projects.length} 个` : ''}</span></div>
+          <button type="button" className="new-project-button" onClick={() => setPage('templates')}><span>＋</span><span><strong>新建拼图</strong><small>选择模板开始创作</small></span><b>›</b></button>
+          <div className="filter-tabs" role="tablist">{([['all','全部'],['draft','编辑中'],['exported','已导出']] as const).map(([value,label]) => <button key={value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div>
+          {visibleProjects.length ? <div className="project-list">{visibleProjects.map(project => { const templateInfo = templates.find(item => item.id === project.template); const count = project.assets.filter(Boolean).length; return <article className="project-card" key={project.id}>
+            <button className="project-main" onClick={() => void continueProject(project)}><ProjectThumb blob={project.thumbnail} template={project.template}/><span className="project-info"><strong>{project.name}</strong><small>{templateInfo?.name ?? '照片拼图'} · {count} 张</small><small>{project.lastExportedAt ? (project.updatedAt > project.lastExportedAt ? '有新修改 · 曾导出' : '已导出') : '编辑中'} · {new Date(project.updatedAt).toLocaleString('zh-CN', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })}</small></span><span className="template-arrow">›</span></button>
+            <div className="project-actions"><button onClick={() => void continueProject(project)}>继续编辑</button><button onClick={() => { setRenameId(project.id); setRenameValue(project.name); }}>重命名</button><button onClick={() => void cloneProject(project)}>复制</button><button onClick={() => void deleteProject(project)}>删除</button></div>
+          </article>; })}</div> : <div className="empty-projects"><span>▧</span><strong>{filter === 'all' ? '还没有作品' : `没有${filter === 'draft' ? '编辑中' : '已导出'}的作品`}</strong><p>新建拼图后，作品会出现在这里。</p></div>}
+          {renameId && <div className="rename-backdrop"><section className="rename-dialog"><strong>重命名作品</strong><input autoFocus value={renameValue} onChange={event => setRenameValue(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void saveRename(); }}/><div><button onClick={() => setRenameId(null)}>取消</button><button className="confirm" onClick={() => void saveRename()}>保存</button></div></section></div>}
+        </>}
+      </main>
+      <nav className="bottom-nav"><button className={page !== 'settings' ? 'active' : ''} onClick={() => setPage('works')}><span>▦</span>作品</button><button className={page === 'settings' ? 'active' : ''} onClick={() => setPage('settings')}><span>⚙</span>设置</button></nav>
+    </>;
+  }
 
   const layout = getLayout(template, frames, margins);
   const selectedTemplate = templates.find(item => item.id === template)!;
@@ -279,7 +398,7 @@ function App() {
   const selectedCaption = selectedSlot === null ? null : captions[selectedSlot];
 
   return <main className="app-shell editor-page">
-    <header className="editor-header"><button className="back-button" type="button" onClick={() => setTemplate(null)} aria-label="返回选择排版">‹ <span>排版</span></button><h1>{selectedTemplate.name}</h1></header>
+    <header className="editor-header"><button className="back-button" type="button" onClick={async () => { await flushCurrentProject(); setPage('works'); setTemplate(null); }} aria-label="返回作品">‹ <span>作品</span></button><input className="project-title-input" aria-label="作品名称" value={projectName || projects.find(item => item.id === activeProjectId)?.name || `${selectedTemplate.name}作品`} onChange={event => setProjectName(event.target.value)} /><span className="autosave-label">自动保存</span></header>
     <p className="editor-tip">{pip ? '点击背景或相框添加照片；拖动相框移动位置，拖右下角调整大小。' : '点击画面中的位置，选择或更换对应照片。'}</p>
     <div className="canvas-wrap"><div ref={canvasRef} className={`layout-canvas ${pip ? 'pip-canvas' : ''} ${polaroid ? 'polaroid-canvas' : ''} ${pip && result ? 'rendered-preview' : ''}`} style={{ aspectRatio: `${layout.width} / ${layout.height}` }}>
       {pip ? result && <img src={result.url} alt={`${selectedTemplate.name}排版预览`}/> : result ? <img src={result.url} alt={`${selectedTemplate.name}排版预览`}/> : <div className="render-loading">{busy ? '正在生成预览…' : '预览暂不可用'}</div>}
