@@ -118,7 +118,7 @@ function App() {
   const suppressClick = useRef(false);
   const autosaveVersion = useRef(0);
 
-  useEffect(() => { readProjects().then(items => { setProjects(items); setLoaded(true); }).catch(() => setLoaded(true)); }, []);
+  useEffect(() => { readProjects().then(items => { setProjects(items); setLoaded(true); }).catch(error => { setLoaded(true); setMessage(`读取作品库失败：${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`); }); }, []);
   useEffect(() => { navigator.storage?.estimate?.().then(value => setStorageUsage(value)).catch(() => {}); }, [page]);
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'auto' }); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; }, [page]);
 
@@ -173,13 +173,13 @@ function App() {
       const prior = projects.find(item => item.id === activeProjectId);
       const record: PhotoProject = { id: activeProjectId, name: projectName || prior?.name || '未命名作品', template,
         createdAt: prior?.createdAt ?? Date.now(), updatedAt: Date.now(), lastExportedAt: prior?.lastExportedAt,
-        frames, adjustments, captions, margins, quality, assets: await Promise.all(slotFiles.map(async f => f ? f.slice(0, f.size, f.type) : null)), thumbnail: prior?.thumbnail };
+        frames, adjustments, captions, margins, quality, assets: slotFiles, thumbnail: prior?.thumbnail };
       try {
         if (version !== autosaveVersion.current) return;
         await writeProject(record);
         if (version === autosaveVersion.current) setProjects(current => [record, ...current.filter(item => item.id !== record.id)].sort((a,b) => b.updatedAt-a.updatedAt));
       }
-      catch { if (version === autosaveVersion.current) setMessage('本地保存失败，设备存储空间可能不足。'); }
+      catch (error) { if (version === autosaveVersion.current) setMessage(`自动保存失败：${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`); }
     }, 450);
     return () => { window.clearTimeout(timer); if (version === autosaveVersion.current) autosaveVersion.current += 1; };
   }, [loaded, page, template, activeProjectId, projectName, slotFiles, frames, adjustments, captions, margins, quality]);
@@ -219,8 +219,8 @@ function App() {
       setFrames(current.frames); setAdjustments(current.adjustments); setCaptions(current.captions); setMargins(current.margins); setQuality(current.quality);
       setSlotFiles(current.assets.map(blob => blob));
       setSelectedSlot(current.template.startsWith('polaroid-') ? 0 : null); setResult(null); setMessage(''); setPreviewError(false); setPage('editor');
-    } catch {
-      setMessage('无法读取本地作品，请重新打开页面后重试。');
+    } catch (error) {
+      setMessage(`读取作品失败：${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`);
     }
   }
 
@@ -246,7 +246,7 @@ function App() {
     const prior = projects.find(item => item.id === activeProjectId);
     const record: PhotoProject = { id: activeProjectId, name: projectName || prior?.name || '未命名作品', template,
       createdAt: prior?.createdAt ?? Date.now(), updatedAt: Date.now(), lastExportedAt: prior?.lastExportedAt,
-      frames, adjustments, captions, margins, quality, assets: await Promise.all(slotFiles.map(async f => f ? f.slice(0, f.size, f.type) : null)), thumbnail: prior?.thumbnail };
+      frames, adjustments, captions, margins, quality, assets: slotFiles, thumbnail: prior?.thumbnail };
     await writeProject(record);
     setProjects(current => [record, ...current.filter(item => item.id !== record.id)].sort((a,b) => b.updatedAt-a.updatedAt));
   }
@@ -417,6 +417,7 @@ function App() {
           {renameId && <div className="rename-backdrop"><section className="rename-dialog"><strong>重命名作品</strong><input autoFocus value={renameValue} onChange={event => setRenameValue(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void saveRename(); }}/><div><button onClick={() => setRenameId(null)}>取消</button><button className="confirm" onClick={() => void saveRename()}>保存</button></div></section></div>}
         </>}
       </main>
+      {page === 'works' && message && <p className="status" role="status">{message}</p>}
       <nav className="bottom-nav"><button className={page !== 'settings' ? 'active' : ''} onClick={() => setPage('works')}><Images aria-hidden="true" strokeWidth={1.8}/>作品</button><button className={page === 'settings' ? 'active' : ''} onClick={() => setPage('settings')}><Settings aria-hidden="true" strokeWidth={1.8}/>设置</button></nav>
     </>;
   }
@@ -430,7 +431,7 @@ function App() {
   const selectedCaption = selectedSlot === null ? null : captions[selectedSlot];
 
   return <main className="app-shell editor-page">
-    <header className="editor-header"><button className="back-button" type="button" onClick={async () => { autosaveVersion.current += 1; await flushCurrentProject(); setPage('works'); setTemplate(null); setSlotFiles([]); setFileUrls([]); setResult(null); setSelectedSlot(null); setCropTarget(null); }} aria-label="返回作品">‹ <span>作品</span></button><input className="project-title-input" aria-label="作品名称" value={projectName || projects.find(item => item.id === activeProjectId)?.name || `${selectedTemplate.name}作品`} onChange={event => setProjectName(event.target.value)} /><span className="autosave-label">自动保存</span></header>
+    <header className="editor-header"><button className="back-button" type="button" onClick={async () => { autosaveVersion.current += 1; try { await flushCurrentProject(); } catch (error) { setMessage(`返回前保存失败：${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`); return; } setPage('works'); setTemplate(null); setSlotFiles([]); setFileUrls([]); setResult(null); setSelectedSlot(null); setCropTarget(null); }} aria-label="返回作品">‹ <span>作品</span></button><input className="project-title-input" aria-label="作品名称" value={projectName || projects.find(item => item.id === activeProjectId)?.name || `${selectedTemplate.name}作品`} onChange={event => setProjectName(event.target.value)} /><span className="autosave-label">自动保存</span></header>
     <p className="editor-tip">{pip ? '点击背景或相框添加照片；拖动相框移动位置，拖右下角调整大小。' : '点击画面中的位置，选择或更换对应照片。'}</p>
     <div className="canvas-wrap"><div ref={canvasRef} className={`layout-canvas ${pip ? 'pip-canvas' : ''} ${polaroid ? 'polaroid-canvas' : ''} ${pip && result ? 'rendered-preview' : ''}`} style={{ aspectRatio: `${layout.width} / ${layout.height}` }}>
       {pip ? result && <img src={result.url} alt={`${selectedTemplate.name}排版预览`}/> : result ? <img src={result.url} alt={`${selectedTemplate.name}排版预览`}/> : <div className="render-loading">{busy ? '正在生成预览…' : previewError ? '预览生成失败，请重新选择照片' : '等待生成预览…'}</div>}
