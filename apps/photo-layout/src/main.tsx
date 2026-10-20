@@ -116,6 +116,7 @@ function App() {
   const activeSlot = useRef(0);
   const frameDrag = useRef<FrameDrag | null>(null);
   const suppressClick = useRef(false);
+  const autosaveVersion = useRef(0);
 
   useEffect(() => { readProjects().then(items => { setProjects(items); setLoaded(true); }).catch(() => setLoaded(true)); }, []);
   useEffect(() => { navigator.storage?.estimate?.().then(value => setStorageUsage(value)).catch(() => {}); }, [page]);
@@ -166,17 +167,22 @@ function App() {
   }, [page, slotFiles, template, frames, adjustments, quality, captions, margins]);
 
   useEffect(() => {
-    if (!loaded || !template || !activeProjectId) return;
+    if (!loaded || page !== 'editor' || !template || !activeProjectId) return;
+    const version = ++autosaveVersion.current;
     const timer = window.setTimeout(async () => {
       const prior = projects.find(item => item.id === activeProjectId);
       const record: PhotoProject = { id: activeProjectId, name: projectName || prior?.name || '未命名作品', template,
         createdAt: prior?.createdAt ?? Date.now(), updatedAt: Date.now(), lastExportedAt: prior?.lastExportedAt,
         frames, adjustments, captions, margins, quality, assets: await Promise.all(slotFiles.map(async f => f ? f.slice(0, f.size, f.type) : null)), thumbnail: prior?.thumbnail };
-      try { await writeProject(record); setProjects(current => [record, ...current.filter(item => item.id !== record.id)].sort((a,b) => b.updatedAt-a.updatedAt)); }
-      catch { setMessage('本地保存失败，设备存储空间可能不足。'); }
+      try {
+        if (version !== autosaveVersion.current) return;
+        await writeProject(record);
+        if (version === autosaveVersion.current) setProjects(current => [record, ...current.filter(item => item.id !== record.id)].sort((a,b) => b.updatedAt-a.updatedAt));
+      }
+      catch { if (version === autosaveVersion.current) setMessage('本地保存失败，设备存储空间可能不足。'); }
     }, 450);
-    return () => window.clearTimeout(timer);
-  }, [loaded, template, activeProjectId, projectName, slotFiles, frames, adjustments, captions, margins, quality]);
+    return () => { window.clearTimeout(timer); if (version === autosaveVersion.current) autosaveVersion.current += 1; };
+  }, [loaded, page, template, activeProjectId, projectName, slotFiles, frames, adjustments, captions, margins, quality]);
 
   function openTemplate(next: TemplateId) {
     const count = getLayout(next).slots.length;
@@ -424,7 +430,7 @@ function App() {
   const selectedCaption = selectedSlot === null ? null : captions[selectedSlot];
 
   return <main className="app-shell editor-page">
-    <header className="editor-header"><button className="back-button" type="button" onClick={async () => { await flushCurrentProject(); setPage('works'); setTemplate(null); setSlotFiles([]); setFileUrls([]); setResult(null); setSelectedSlot(null); setCropTarget(null); }} aria-label="返回作品">‹ <span>作品</span></button><input className="project-title-input" aria-label="作品名称" value={projectName || projects.find(item => item.id === activeProjectId)?.name || `${selectedTemplate.name}作品`} onChange={event => setProjectName(event.target.value)} /><span className="autosave-label">自动保存</span></header>
+    <header className="editor-header"><button className="back-button" type="button" onClick={async () => { autosaveVersion.current += 1; await flushCurrentProject(); setPage('works'); setTemplate(null); setSlotFiles([]); setFileUrls([]); setResult(null); setSelectedSlot(null); setCropTarget(null); }} aria-label="返回作品">‹ <span>作品</span></button><input className="project-title-input" aria-label="作品名称" value={projectName || projects.find(item => item.id === activeProjectId)?.name || `${selectedTemplate.name}作品`} onChange={event => setProjectName(event.target.value)} /><span className="autosave-label">自动保存</span></header>
     <p className="editor-tip">{pip ? '点击背景或相框添加照片；拖动相框移动位置，拖右下角调整大小。' : '点击画面中的位置，选择或更换对应照片。'}</p>
     <div className="canvas-wrap"><div ref={canvasRef} className={`layout-canvas ${pip ? 'pip-canvas' : ''} ${polaroid ? 'polaroid-canvas' : ''} ${pip && result ? 'rendered-preview' : ''}`} style={{ aspectRatio: `${layout.width} / ${layout.height}` }}>
       {pip ? result && <img src={result.url} alt={`${selectedTemplate.name}排版预览`}/> : result ? <img src={result.url} alt={`${selectedTemplate.name}排版预览`}/> : <div className="render-loading">{busy ? '正在生成预览…' : previewError ? '预览生成失败，请重新选择照片' : '等待生成预览…'}</div>}

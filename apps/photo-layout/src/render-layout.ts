@@ -103,27 +103,49 @@ function loadImageSource(source: string): Promise<HTMLImageElement> {
   });
 }
 
-async function loadImage(file: Blob): Promise<CanvasImageSource> {
-  if (!file.size) throw new Error('照片数据为空，请重新选择照片');
+function describeImageError(error: unknown) {
+  if (error instanceof DOMException) return `${error.name}: ${error.message}`;
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  return String(error);
+}
+
+async function loadImage(file: Blob, index: number): Promise<CanvasImageSource> {
+  const label = `照片${index + 1}（${file.type || '格式未知'}，${file.size} 字节）`;
+  if (!file.size) throw new Error(`${label}：数据为空`);
+  let bitmapError = '不可用';
   if (typeof createImageBitmap === 'function') {
-    try { return await createImageBitmap(file); } catch { /* Fall through to browser image decoding. */ }
+    try { return await createImageBitmap(file); } catch (error) { bitmapError = describeImageError(error); }
   }
+  let urlError = '未尝试';
   const url = URL.createObjectURL(file);
   try {
     return await loadImageSource(url);
-  } catch {
+  } catch (error) {
+    urlError = describeImageError(error);
     // Some mobile WebViews intermittently fail to decode IndexedDB-backed blob URLs.
     // A data URL fallback lets the same saved bytes load without asking the user to reselect.
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error('照片数据读取失败，请重新选择照片'));
-      reader.readAsDataURL(file);
-    });
-    return await loadImageSource(dataUrl);
   } finally {
     URL.revokeObjectURL(url);
   }
+  let readerError = '未尝试';
+  let dataUrlError = '未尝试';
+  let dataUrl = '';
+  try {
+    dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error ?? new Error('FileReader 未返回具体错误'));
+      reader.onabort = () => reject(new Error('FileReader 读取被中断'));
+      reader.readAsDataURL(file);
+    });
+  } catch (error) {
+    readerError = describeImageError(error);
+  }
+  if (dataUrl) {
+    try { return await loadImageSource(dataUrl); }
+    catch (error) { dataUrlError = describeImageError(error); }
+  }
+  throw new Error(`${label}读取失败。createImageBitmap：${bitmapError}；Blob URL：${urlError}；FileReader：${readerError}；Data URL 解码：${dataUrlError}`);
 }
 
 function imageSize(image: CanvasImageSource) {
@@ -220,7 +242,7 @@ export async function renderLayout(files: (Blob | null)[], template: TemplateId,
     const usedFonts = captions.flatMap(caption => [caption.font1, caption.line2Enabled ? caption.font2 : '']).filter(Boolean);
     await Promise.allSettled(usedFonts.map(font => document.fonts.load(`24px "${font}"`)));
   }
-  const loadedImages = await Promise.allSettled(layout.slots.map((_, i) => files[i] ? loadImage(files[i]) : Promise.resolve(null)));
+  const loadedImages = await Promise.allSettled(layout.slots.map((_, i) => files[i] ? loadImage(files[i], i) : Promise.resolve(null)));
   const failedImage = loadedImages.find((item): item is PromiseRejectedResult => item.status === 'rejected');
   if (failedImage) {
     loadedImages.forEach(item => {
