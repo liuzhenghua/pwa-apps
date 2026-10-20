@@ -103,8 +103,11 @@ function loadImageSource(source: string): Promise<HTMLImageElement> {
   });
 }
 
-async function loadImage(file: Blob): Promise<HTMLImageElement> {
+async function loadImage(file: Blob): Promise<CanvasImageSource> {
   if (!file.size) throw new Error('照片数据为空，请重新选择照片');
+  if (typeof createImageBitmap === 'function') {
+    try { return await createImageBitmap(file); } catch { /* Fall through to browser image decoding. */ }
+  }
   const url = URL.createObjectURL(file);
   try {
     return await loadImageSource(url);
@@ -123,25 +126,32 @@ async function loadImage(file: Blob): Promise<HTMLImageElement> {
   }
 }
 
-function adjustedTransform(image: HTMLImageElement, rect: Rect, adjustment: PhotoAdjustment, fit: PhotoFit = 'cover') {
+function imageSize(image: CanvasImageSource) {
+  if ('naturalWidth' in image && image.naturalWidth) return { width: image.naturalWidth, height: image.naturalHeight };
+  if ('width' in image && 'height' in image) return { width: Number(image.width), height: Number(image.height) };
+  throw new Error('无法识别照片尺寸');
+}
+
+function adjustedTransform(image: CanvasImageSource, rect: Rect, adjustment: PhotoAdjustment, fit: PhotoFit = 'cover') {
+  const { width, height } = imageSize(image);
   const angle = adjustment.rotation * Math.PI / 180;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   const absCos = Math.abs(cos);
   const absSin = Math.abs(sin);
-  const cover = Math.max(rect.w / image.naturalWidth, rect.h / image.naturalHeight);
-  const contain = Math.min(rect.w / image.naturalWidth, rect.h / image.naturalHeight);
+  const cover = Math.max(rect.w / width, rect.h / height);
+  const contain = Math.min(rect.w / width, rect.h / height);
   const rotatedCover = Math.max(
-    (absCos * rect.w + absSin * rect.h) / image.naturalWidth,
-    (absSin * rect.w + absCos * rect.h) / image.naturalHeight,
+    (absCos * rect.w + absSin * rect.h) / width,
+    (absSin * rect.w + absCos * rect.h) / height,
   );
   const scale = fit === 'contain'
     ? contain * adjustment.zoom
     : Math.max(cover * adjustment.zoom, rotatedCover);
   const requestedX = adjustment.offsetX * rect.w;
   const requestedY = adjustment.offsetY * rect.h;
-  const maxLocalX = Math.max(0, (image.naturalWidth * scale - absCos * rect.w - absSin * rect.h) / 2);
-  const maxLocalY = Math.max(0, (image.naturalHeight * scale - absSin * rect.w - absCos * rect.h) / 2);
+  const maxLocalX = Math.max(0, (width * scale - absCos * rect.w - absSin * rect.h) / 2);
+  const maxLocalY = Math.max(0, (height * scale - absSin * rect.w - absCos * rect.h) / 2);
   const localX = Math.max(-maxLocalX, Math.min(maxLocalX, cos * requestedX + sin * requestedY));
   const localY = Math.max(-maxLocalY, Math.min(maxLocalY, -sin * requestedX + cos * requestedY));
   const dx = cos * localX - sin * localY;
@@ -149,20 +159,21 @@ function adjustedTransform(image: HTMLImageElement, rect: Rect, adjustment: Phot
   return { angle, scale, dx, dy };
 }
 
-export function clampAdjustment(image: HTMLImageElement, rect: Rect, adjustment: PhotoAdjustment, fit: PhotoFit = 'cover'): PhotoAdjustment {
+export function clampAdjustment(image: CanvasImageSource, rect: Rect, adjustment: PhotoAdjustment, fit: PhotoFit = 'cover'): PhotoAdjustment {
   const { dx, dy } = adjustedTransform(image, rect, adjustment, fit);
   return { ...adjustment, offsetX: dx / rect.w, offsetY: dy / rect.h };
 }
 
-export function drawAdjusted(ctx: CanvasRenderingContext2D, image: HTMLImageElement, rect: Rect, adjustment = defaultAdjustment(), fit: PhotoFit = 'cover') {
+export function drawAdjusted(ctx: CanvasRenderingContext2D, image: CanvasImageSource, rect: Rect, adjustment = defaultAdjustment(), fit: PhotoFit = 'cover') {
   const { angle, scale, dx, dy } = adjustedTransform(image, rect, adjustment, fit);
+  const { width, height } = imageSize(image);
   ctx.save();
   ctx.beginPath();
   ctx.rect(rect.x, rect.y, rect.w, rect.h);
   ctx.clip();
   ctx.translate(rect.x + rect.w / 2 + dx, rect.y + rect.h / 2 + dy);
   ctx.rotate(angle);
-  ctx.drawImage(image, -image.naturalWidth * scale / 2, -image.naturalHeight * scale / 2, image.naturalWidth * scale, image.naturalHeight * scale);
+  ctx.drawImage(image, -width * scale / 2, -height * scale / 2, width * scale, height * scale);
   ctx.restore();
 }
 
@@ -209,7 +220,15 @@ export async function renderLayout(files: (Blob | null)[], template: TemplateId,
     const usedFonts = captions.flatMap(caption => [caption.font1, caption.line2Enabled ? caption.font2 : '']).filter(Boolean);
     await Promise.allSettled(usedFonts.map(font => document.fonts.load(`24px "${font}"`)));
   }
-  const images = await Promise.all(layout.slots.map((_, i) => files[i] ? loadImage(files[i]) : Promise.resolve(null)));
+  const loadedImages = await Promise.allSettled(layout.slots.map((_, i) => files[i] ? loadImage(files[i]) : Promise.resolve(null)));
+  const failedImage = loadedImages.find((item): item is PromiseRejectedResult => item.status === 'rejected');
+  if (failedImage) {
+    loadedImages.forEach(item => {
+      if (item.status === 'fulfilled' && item.value && typeof ImageBitmap !== 'undefined' && item.value instanceof ImageBitmap) item.value.close();
+    });
+    throw failedImage.reason;
+  }
+  const images = loadedImages.map(item => (item as PromiseFulfilledResult<CanvasImageSource | null>).value);
   const canvas = document.createElement('canvas');
   const outputScale = quality === 1 ? 1 : quality === 3 ? 2 : 1.5;
   canvas.width = Math.round(layout.width * outputScale);
@@ -259,6 +278,10 @@ export async function renderLayout(files: (Blob | null)[], template: TemplateId,
       if (template.startsWith('polaroid-')) drawCaption(ctx, template, slot.rect, captions[i] ?? defaultCaption(i));
     });
   }
+
+  images.forEach(image => {
+    if (image && typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap) image.close();
+  });
 
   return new Promise((resolve, reject) => {
     canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('无法导出图片')), 'image/jpeg', 0.94);
