@@ -1,3 +1,4 @@
+import { ComparisonReport } from "./ComparisonReport";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -142,6 +143,8 @@ function App() {
     [note, setNote] = useState("");
   const [reportMonth, setReportMonth] = useState(""),
     [baselineMonth, setBaselineMonth] = useState("");
+  const [comparisonMonth, setComparisonMonth] = useState("");
+  const [comparisonVisible, setComparisonVisible] = useState(false);
   const [auditEditingId, setAuditEditingId] = useState<string | null>(null);
   const [auditAmounts, setAuditAmounts] = useState<Record<string, string>>({});
   const [auditChangedIds, setAuditChangedIds] = useState<string[]>([]);
@@ -456,9 +459,12 @@ function App() {
   const reports = data.reports || [];
   const selectedReport =
     reports.find((r) => r.month === reportMonth) || reports.at(-1);
-  const baselineReport =
-    reports.find((r) => r.month === baselineMonth) ||
-    reports.filter((r) => r.month < (selectedReport?.month || "")).at(-1);
+  const sortedComparisonReports = [...reports].sort((a,b)=>a.month.localeCompare(b.month));
+  const effectiveCurrentMonth = reports.some(r=>r.month===comparisonMonth)?comparisonMonth:sortedComparisonReports.at(-1)?.month||'';
+  const effectiveBaselineMonth = reports.some(r=>r.month===baselineMonth)?baselineMonth:sortedComparisonReports.filter(r=>r.month<effectiveCurrentMonth).at(-1)?.month||'';
+  const baselineReport = reports.find(r=>r.month===(effectiveBaselineMonth<effectiveCurrentMonth?effectiveBaselineMonth:effectiveCurrentMonth));
+  const comparisonReport = reports.find(r=>r.month===(effectiveBaselineMonth<effectiveCurrentMonth?effectiveCurrentMonth:effectiveBaselineMonth));
+  useEffect(() => { setComparisonVisible(false); }, [effectiveBaselineMonth, effectiveCurrentMonth, includeTrendProperty]);
   const reportPropertyValue = (report: (typeof reports)[number] | undefined) =>
     (report?.details || [])
       .filter((item) => item.kind === "asset" && item.category === "房产")
@@ -473,13 +479,6 @@ function App() {
   const selectedReportNet = selectedReport
     ? selectedReport.net -
       (includeTrendProperty ? 0 : reportPropertyValue(selectedReport))
-    : 0;
-  const baselineReportDetails = (baselineReport?.details || []).filter(
-    (item) => includeTrendProperty || item.category !== "房产",
-  );
-  const baselineReportNet = baselineReport
-    ? baselineReport.net -
-      (includeTrendProperty ? 0 : reportPropertyValue(baselineReport))
     : 0;
   const reportAssetDetails = selectedReportDetails.filter(
     (item) => item.kind === "asset",
@@ -1275,53 +1274,16 @@ function App() {
                                 </div>
                               ))}
                           </div>
-                          <label className="report-compare">
-                            对比月份
-                            <select
-                              value={baselineReport?.month || ""}
-                              onChange={(e) => setBaselineMonth(e.target.value)}
-                            >
-                              <option value="" disabled>
-                                选择已有报告
-                              </option>
-                              {reports
-                                .filter((r) => r.month < selectedReport.month)
-                                .map((r) => (
-                                  <option key={r.month} value={r.month}>
-                                    {r.month}
-                                  </option>
-                                ))}
-                            </select>
-                          </label>
-                          {baselineReport &&
-                          baselineReport.month < selectedReport.month &&
-                          !selectedReportDetails.some(
-                            (item) => item.amount === null,
-                          ) &&
-                          !baselineReportDetails.some(
-                            (item) => item.amount === null,
-                          ) ? (
-                            <div className="report-change">
-                              较 {baselineReport.month} 净资产变化
-                              <strong>
-                                {selectedReportNet - baselineReportNet >= 0
-                                  ? "+"
-                                  : ""}
-                                {money(
-                                  selectedReportNet - baselineReportNet,
-                                )}
-                              </strong>
-                              <small>
-                                {baselineReportNet > 0
-                                  ? `${(((selectedReportNet - baselineReportNet) / baselineReportNet) * 100).toFixed(1)}%`
-                                  : "基准净资产非正数，不计算增长率"}
-                              </small>
-                            </div>
-                          ) : (
-                            <p className="hint">
-                              有两个月的完整报告后可比较净资产变化。
-                            </p>
-                          )}
+                          <div className="comparison-picker">
+                            <h3>月度对比</h3>
+                            <p className="hint">默认比较最新一期与上一次报告，也可自行选择月份。</p>
+                            <label className="report-compare">本期<select value={effectiveCurrentMonth} onChange={e=>{setComparisonMonth(e.target.value);setBaselineMonth(sortedComparisonReports.filter(r=>r.month<e.target.value).at(-1)?.month||sortedComparisonReports.find(r=>r.month!==e.target.value)?.month||'')}}>{[...sortedComparisonReports].reverse().map(r=><option key={r.month} value={r.month}>{r.month}{r.month===sortedComparisonReports.at(-1)?.month?' · 最新一期':''}</option>)}</select></label>
+                            <label className="report-compare">与哪一期比较<select value={effectiveBaselineMonth} onChange={e=>setBaselineMonth(e.target.value)}><option value="" disabled>请选择月份</option>{[...sortedComparisonReports].reverse().filter(r=>r.month!==effectiveCurrentMonth).map(r=><option key={r.month} value={r.month}>{r.month}{r.auditedAt?' · 已盘点':' · 余额汇总'}</option>)}</select></label>
+                            <button className="primary full" disabled={!baselineReport||!comparisonReport||!effectiveBaselineMonth||effectiveBaselineMonth===effectiveCurrentMonth} onClick={()=>setComparisonVisible(true)}>查看对比报告</button>
+                            {baselineReport&&comparisonReport&&effectiveBaselineMonth!==effectiveCurrentMonth&&<p className="hint">查看 {comparisonReport.month} 较 {baselineReport.month} 的财务变化</p>}
+                            {reports.length<2&&<p className="hint">至少需要两个月的报告才能对比，无需每月盘点。</p>}
+                          </div>
+                          {comparisonVisible&&baselineReport&&comparisonReport&&<ComparisonReport current={comparisonReport} baseline={baselineReport} includeProperty={includeTrendProperty}/>}
                         </>
                       )}
                     </section>
