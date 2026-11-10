@@ -38,7 +38,8 @@ function App() {
   const [categories, setCategories] = useState<Category[]>(() => readStored('notes:categories', defaults));
   const [subpage, setSubpage] = useState<'' | 'categories' | 'trash' | 'backup' | 'editor'>('');
   const [category, setCategory] = useState('all');
-  const [sort, setSort] = useState('updated');
+  const [sort, setSort] = useState('visited');
+  const [visits, setVisits] = useState<Record<string, number>>(() => readStored('notes:last-visited', {}));
   const [ready, setReady] = useState(false);
   const [saveState, setSaveState] = useState('正在加载');
   const [categoryName, setCategoryName] = useState('');
@@ -70,7 +71,14 @@ function App() {
     pending.then(() => { if (saveQueue.current === pending) setSaveState('已保存'); }).catch(() => setSaveState('保存失败，请立即导出备份'));
   }
   function changeCategories(groups: Category[]) { categoriesRef.current = groups; setCategories(groups); persist(notesRef.current, groups); }
-  function openNote(id: string) { history.current = { past: [], future: [] }; setPreview(preferences.preview); setSelected(id); }
+  function openNote(id: string) {
+    setVisits(previous => {
+      const next = { ...previous, [id]: Date.now() };
+      saveStored('notes:last-visited', next);
+      return next;
+    });
+    history.current = { past: [], future: [] }; setPreview(preferences.preview); setSelected(id);
+  }
   function patchNote(id: string, patch: Partial<Note>) { update(notesRef.current.map(n => n.id === id ? { ...n, ...patch, updated: Date.now() } : n)); }
   function undo(redo = false) {
     if (!current) return;
@@ -156,7 +164,7 @@ function App() {
   const visible = [...activeNotes]
     .filter(note => `${note.title} ${note.body}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
     .filter(note => category === 'all' || (note.categoryId || 'uncategorized') === category)
-    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || (sort === 'title' ? a.title.localeCompare(b.title, 'zh-CN') : b.updated - a.updated));
+    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || (sort === 'title' ? a.title.localeCompare(b.title, 'zh-CN') : sort === 'visited' ? (visits[b.id] ?? b.updated) - (visits[a.id] ?? a.updated) || b.updated - a.updated : b.updated - a.updated));
   const categoryLabel = (note: Note) => categories.find(c => c.id === note.categoryId)?.name || note.categoryName || '未分类';
   function update(next: Note[]) {
     const groups = [...categoriesRef.current];
@@ -278,7 +286,7 @@ function App() {
       {subpage === 'editor' && <section className="settings-card"><label className="field">默认打开方式<select value={String(preferences.preview)} onChange={e => setPreferences({ ...preferences, preview: e.target.value === 'true' })}><option value="false">Markdown 编辑</option><option value="true">Markdown 预览</option></select></label><label className="field">字体大小<select value={preferences.fontSize} onChange={e => setPreferences({ ...preferences, fontSize: Number(e.target.value) })}>{[15, 17, 19, 21].map(size => <option key={size} value={size}>{size}px</option>)}</select></label><label className="field">主题外观<select value={preferences.theme} onChange={e => setPreferences({ ...preferences, theme: e.target.value })}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label><p>自动保存已开启 · 每次修改均写入本地数据库</p></section>}
       {notice && <p role="status">{notice}</p>}
     </section> : page === 'notes' ? <section className="list-page">
-      <div className="topline"><h1>我的笔记</h1><div className="list-controls"><select aria-label="笔记排序" value={sort} onChange={e => setSort(e.target.value)}><option value="updated">最近修改</option><option value="title">按标题</option></select><p>共 {activeNotes.length} 篇</p></div></div>
+      <div className="topline"><h1>我的笔记</h1><div className="list-controls"><select aria-label="笔记排序" value={sort} onChange={e => setSort(e.target.value)}><option value="visited">最近访问</option><option value="updated">最近修改</option><option value="title">按标题</option></select><p>共 {activeNotes.length} 篇</p></div></div>
       <label className="search"><Search aria-hidden="true" /><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索标题和笔记内容" aria-label="搜索标题和笔记内容" /></label>
       <div className="category-filter"><div className="category-tabs">{[{ id: 'all', name: '全部' }, ...categories.filter(c => c.id !== 'uncategorized')].map(c => <button key={c.id} className={category === c.id ? 'active' : ''} onClick={() => setCategory(c.id)}>{c.name}</button>)}</div><button className="icon-button" onClick={() => setSubpage('categories')} aria-label="管理分类"><Settings /></button></div>
       {visible.length ? <div className="note-list">{visible.map(note => <article className="note-card" key={note.id}><button className="note-open" onClick={() => openNote(note.id)}><span className="note-title">{note.pinned && <span className="pin">置顶 · </span>}{note.title.trim() || '无标题'}</span><span className="note-preview">{note.body.trim().replace(/\s+/g, ' ') || '暂无内容，点击开始记录'}</span><span className="note-footer"><span className="badge">{categoryLabel(note)}</span><span>{formatTime(note.updated)}</span></span></button><details className="menu card-menu"><summary aria-label={`${note.title || '无标题'}的更多操作`}>•••</summary><div><button onClick={() => patchNote(note.id, { pinned: !note.pinned })}>{note.pinned ? '取消置顶' : '置顶'}</button>{groupSelect(note)}<button className="danger" onClick={() => remove(note.id)}>移至回收站</button></div></details></article>)}</div> : <div className="empty"><NotebookPen /><strong>{query || category !== 'all' ? '没有找到笔记' : '记录从这里开始'}</strong><p>{query || category !== 'all' ? '试试其他关键词或分类' : '点击右下角 ＋，写下第一篇笔记'}</p></div>}
