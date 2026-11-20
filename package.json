@@ -2,13 +2,18 @@
   "name": "pwa-apps",
   "private": true,
   "type": "module",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev:notes": "npm run dev -w @pwa-apps/notes",
     "dev:assets": "npm run dev -w @pwa-apps/assets",
     "dev:photo-layout": "npm run dev -w @pwa-apps/photo-layout",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "dev:stocks": "npm run dev -w @pwa-apps/stocks",
+    "test:stocks": "npm run test -w @pwa-apps/stocks"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.7.0",

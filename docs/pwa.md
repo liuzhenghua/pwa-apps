@@ -15,11 +15,11 @@ PWA 可以调用浏览器开放的 Web API，获得一部分接近原生应用�
 
 这些能力并非安装 PWA 后就自动获得，也不是 PWA 独有：不少能力普通网页同样可以调用。每项能力都要由应用单独实现，并受浏览器、操作系统、HTTPS 和用户授权限制；尤其不能假设后台任务在所有手机上可靠执行。参见 [MDN 的 PWA 能力概览](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/What_is_a_progressive_web_app)与 [PWA API 参考](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Reference)。
 
-**本项目目前实际用到的设备能力**是桌面安装、独立窗口和离线资源缓存。照片布局通过文件选择框读取本地照片，并在浏览器支持时使用系统分享面板发送生成的 JPG；文件选择也是普通网页能使用的 Web API。项目目前没有调用相机、定位、系统通知、推送或后台同步。笔记的 GitHub 同步由用户手动触发。
+**本项目目前实际用到的设备能力**是桌面安装、独立窗口和离线资源缓存。照片布局通过文件选择框读取本地照片，并在浏览器支持时使用系统分享面板发送生成的 JPG；文件选择也是普通网页能使用的 Web API。项目目前没有调用相机、定位、系统通知、推送或后台同步。GitHub 同步由用户手动触发。
 
 ## 本项目如何实现
 
-`pwa-apps` 把笔记和照片布局作为两个独立的 PWA 发布在同一个 GitHub Pages 站点下：
+`pwa-apps` 在同一个 GitHub Pages 站点发布笔记、照片布局、资产簿和股票账簿。
 
 | 组成 | 在本项目中的作用 |
 | --- | --- |
@@ -27,7 +27,7 @@ PWA 可以调用浏览器开放的 Web API，获得一部分接近原生应用�
 | `sw.js`（Service Worker） | 由 `vite-plugin-pwa` 在构建时生成，缓存应用页面和静态资源，让已访问的应用在离线时仍有机会打开。 |
 | HTTPS | GitHub Pages 提供安全连接，供浏览器使用 Service Worker 等 PWA 能力。 |
 
-两个应用的启动路径和 Service Worker 范围分别位于 `/pwa-apps/notes/` 与 `/pwa-apps/photo-layout/`，因此可以分别添加到主屏幕。仓库改名时，构建路径也要相应调整。
+四个应用可以分别添加到主屏幕，启动路径和 Service Worker 范围分别位于 `/pwa-apps/notes/`、`/pwa-apps/photo-layout/`、`/pwa-apps/assets/` 和 `/pwa-apps/stocks/`。仓库改名时，构建路径也要相应调整。
 
 ## 安装、离线与数据
 
@@ -35,11 +35,12 @@ PWA 可以调用浏览器开放的 Web API，获得一部分接近原生应用�
 
 - **笔记：** 页面资源缓存与笔记数据是两回事。笔记正文保存在当前浏览器的 `localStorage`，离线时可以查看和编辑；手动同步到 GitHub 私有仓库需要联网。
 - **照片布局：** 已缓存的页面可以离线打开，排版、导出和系统分享在设备上进行；选入的照片只在当前页面会话中使用，刷新后需要重新选择。
+- **资产簿与股票账簿：** 账簿保存在 IndexedDB 中，可离线查看和编辑。JSON 导出与导入可在本机进行，加密同步到 GitHub 私有仓库需要联网。
 
-安装应用不会自动备份笔记。清除浏览器的站点数据可能同时删除本地笔记、同步配置和离线缓存。需要跨设备保存笔记时，请使用笔记应用中的 GitHub 同步功能；同步方式见 [项目 README](../README.md#笔记数据与同步)。
+清除浏览器的站点数据可能同时删除本地记录、同步配置和离线缓存。跨设备同步配置见 [项目 README](../README.md#云端数据与加密-token-配置)。
 
 ## 开发时如何检查
 
-运行 `npm run build` 后，两个应用各自的 `manifest.webmanifest` 和 `sw.js` 会出现在 `dist/notes/`、`dist/photo-layout/`。完整的安装和离线行为应在构建后的站点上检查；开发服务器的表现不一定与发布版本相同。GitHub Pages 的 HTTPS 地址适合在手机上验证。
+运行 `npm run build` 后，每个应用的 `manifest.webmanifest` 和 `sw.js` 会生成在 `dist/` 下对应的应用目录。完整的安装和离线行为应在构建后的站点上检查；开发服务器的表现不一定与发布版本相同。GitHub Pages 的 HTTPS 地址适合在手机上验证。
 
 延伸阅读：[MDN：什么是 PWA](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/What_is_a_progressive_web_app)、[安装 PWA](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable)、[离线与后台运行](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Offline_and_background_operation)。

@@ -45,6 +45,7 @@
     .footer{display:flex;justify-content:space-between;gap:16px;padding:40px 0 32px;color:#94a096;font-size:12px}
     @media(max-width:720px){.shell{width:min(100% - 32px,520px)}.topbar{height:66px}.topbar-note{display:none}.hero{padding:28px 0 34px}.hero-copy{font-size:14px;margin-top:15px}.apps{grid-template-columns:1fr;gap:14px}.preview{height:165px}.mock-notes{transform:translateY(32px) rotate(-4deg)}.mock-photo{transform:translateY(25px) rotate(4deg)}.app-info{padding:17px;gap:13px}.app-icon{width:54px;height:54px;border-radius:13px}.app-text h3{font-size:17px}.app-text p{font-size:12px}.footer{padding-top:32px}}
     @media(prefers-reduced-motion:reduce){.app-card{transition:none}}
+    .preview-stocks{background:linear-gradient(140deg,#e6eeff,#c7d8f6)}.mock-stocks{background:linear-gradient(130deg,#254f98,#10254b)}.mock-stocks strong{color:#ffa4af}.mock-stocks small,.mock-stocks span{color:#c5d8fa}
   </style>
 </head>
 <body>
@@ -59,7 +60,7 @@
         <p class="hero-copy">简单好用的个人应用。打开即用，也可以添加到手机主屏幕，像普通 App 一样随时进入。</p>
       </section>
       <section aria-labelledby="apps-title">
-        <div class="section-heading"><h2 id="apps-title">应用精选</h2><span class="count">共 3 款应用</span></div>
+        <div class="section-heading"><h2 id="apps-title">应用精选</h2><span class="count">共 4 款应用</span></div>
         <div class="apps">
           <a class="app-card" href="__BASE__notes/" aria-label="打开笔记应用">
             <div class="preview preview-notes" aria-hidden="true"><div class="mock-notes"><div class="mock-head"></div><div class="mock-search"></div><div class="mock-line strong"></div><div class="mock-line short"></div><div class="mock-rule"></div><div class="mock-line strong"></div><div class="mock-line"></div></div></div>
@@ -70,6 +71,7 @@
             <div class="app-info"><img class="app-icon" src="__BASE__photo-layout/icon.svg" width="62" height="62" alt=""><div class="app-text"><h3>照片布局</h3><p>选择模板，轻松排版并分享照片</p></div><span class="open">打开</span></div>
           </a>
           <a class="app-card" href="__BASE__assets/" aria-label="打开资产簿应用"><div class="preview preview-assets" aria-hidden="true"><div class="mock-assets"><small>当前净资产</small><strong>¥ 1,268,500</strong><i></i><span>资产追踪 · 加密备份</span></div></div><div class="app-info"><img class="app-icon" src="__BASE__assets/icon.svg" width="62" height="62" alt=""><div class="app-text"><h3>资产簿</h3><p>记录余额，查看净资产变化</p></div><span class="open">打开</span></div></a>
+          <a class="app-card" href="__BASE__stocks/" aria-label="打开股票账簿应用"><div class="preview preview-stocks" aria-hidden="true"><div class="mock-assets mock-stocks"><small>卖出测算</small><strong>+¥294.82</strong><i></i><span>净收益率 +2.54% · 按批次匹配</span></div></div><div class="app-info"><img class="app-icon" src="__BASE__stocks/icon.svg" width="62" height="62" alt=""><div class="app-text"><h3>股票账簿</h3><p>管理买入批次，即时计算卖出收益</p></div><span class="open">打开</span></div></a>
         </div>
       </section>
     </main>

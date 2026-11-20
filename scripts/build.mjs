@@ -7,7 +7,7 @@ const dist = resolve(root, 'dist');
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(dist, { recursive: true });
 
-for (const app of ['notes', 'photo-layout', 'assets']) {
+for (const app of ['notes', 'photo-layout', 'assets', 'stocks']) {
   execFileSync('npm', ['run', 'build', '-w', `@pwa-apps/${app}`], {
     cwd: root,
     stdio: 'inherit',

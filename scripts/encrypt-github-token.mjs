@@ -13,7 +13,7 @@ const cipher = createCipheriv('aes-256-gcm', key, iv);
 const ciphertext = Buffer.concat([cipher.update(token, 'utf8'), cipher.final(), cipher.getAuthTag()]);
 const box = { version: 1, kdf: 'PBKDF2-SHA256', iterations: 600000, salt: salt.toString('base64'), iv: iv.toString('base64'), ciphertext: ciphertext.toString('base64') };
 const encoded = Buffer.from(JSON.stringify(box)).toString('base64url');
-for (const app of ['notes', 'assets']) {
+for (const app of ['notes', 'assets', 'stocks']) {
   const output = resolve(import.meta.dirname, `../apps/${app}/.env.local`);
   writeFileSync(output, `VITE_GITHUB_TOKEN_BOX=${encoded}\n`, { mode: 0o600 });
   process.stdout.write(`已写入 ${output}\n`);
