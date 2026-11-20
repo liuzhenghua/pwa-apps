@@ -2,11 +2,12 @@ import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Calculator, ChevronRight, Cloud, Download, Plus, Upload } from 'lucide-react';
 import {
   amountOf, average, cents, feeFields, feeTotal, holding, percent, remainingCost, sum, validateProfile,
-  type Ledger, type Lot, type Profile, type Sale, type Stock,
+  type Buy, type Ledger, type Lot, type Profile, type Sale, type Stock,
 } from './domain.ts';
 import { bundledToken, repository, type SyncDirection } from './backup.ts';
 import { count, dateLabel, localDate, money, priceInput, rateLabel, tone } from './format.ts';
 import { feeLabels, FeesList, SaleMatches } from './orders.tsx';
+import { BottomSheet } from './sheet.tsx';
 import type { LocalState } from './store.ts';
 
 export function Metric({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
@@ -19,8 +20,8 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
 
 type Projection = { lots: Lot[]; sales: Map<string, Sale> };
 
-export function Portfolio({ ledger, lots, sales, add, detail, calculate }: Projection & {
-  ledger: Ledger; add: () => void; detail: (id: string) => void; calculate: (id: string) => void;
+export function Portfolio({ ledger, lots, sales, add, detail, buy, sell }: Projection & {
+  ledger: Ledger; add: () => void; detail: (id: string) => void; buy: (id: string) => void; sell: (id: string) => void;
 }) {
   const holdings = ledger.stocks.map(stock => ({ stock, ...holding(stock, lots) }));
   const marketValue = sum(holdings.map(item => item.marketValue));
@@ -50,19 +51,35 @@ export function Portfolio({ ledger, lots, sales, add, detail, calculate }: Proje
             <Metric label="浮动盈亏" className={tone(float)}>{money(float, true)}<small>{rateLabel(percent(float, basis))}</small></Metric>
           </dl>
           <p className="lot-summary">{active.length} 个未清批次 <span>·</span> 最低买入价 {active.length ? money(active[0].price) : '—'}</p>
-          <div className="card-actions"><button onClick={() => detail(stock.id)}>查看详情 <ChevronRight size={16} /></button><button className="tinted" onClick={() => calculate(stock.id)}><Calculator size={16} /> 卖出测算</button></div>
+          <div className="card-actions">
+            <button onClick={() => detail(stock.id)}>查看详情</button>
+            <button className="tinted" onClick={() => buy(stock.id)}>买入</button>
+            <button className="tinted" onClick={() => sell(stock.id)}>卖出</button>
+          </div>
         </article>
       )}
     </div>
   </>;
 }
 
-export function StockDetail({ stock, ledger, lots, sales, edit, buy, sell, remove }: Projection & {
+export function StockDetail({ stock, ledger, lots, sales, edit, buy, sell, editPurchase, removePurchase, remove }: Projection & {
   stock: Stock; ledger: Ledger; edit: () => void; buy: () => void; sell: () => void; remove: () => void;
+  editPurchase: (order: Buy) => void; removePurchase: (order: Buy) => void;
 }) {
+  const [selectedLotId, setSelectedLotId] = useState<string>();
   const position = holding(stock, lots);
   const net = sum(ledger.orders.filter(order => order.stockId === stock.id && order.kind === 'sell').map(order => sales.get(order.id)!.net));
+  const matchedPurchases = new Set(lots.filter(lot => lot.remaining < lot.quantity).map(lot => lot.orderId));
+  const purchases = new Map(ledger.orders.filter(order => order.kind === 'buy').map(order => [order.id, order]));
   const closed = lots.filter(lot => lot.stockId === stock.id && lot.remaining === 0).length;
+  const selectedLot = position.active.find(lot => lot.id === selectedLotId);
+  const selectedPurchase = selectedLot && purchases.get(selectedLot.orderId);
+
+  function actOnPurchase(action: (order: Buy) => void, order: Buy) {
+    setSelectedLotId(undefined);
+    action(order);
+  }
+
   return <>
     <section className="panel">
       <div className="section-title">
@@ -79,15 +96,46 @@ export function StockDetail({ stock, ledger, lots, sales, edit, buy, sell, remov
     <section className="panel">
       <div className="section-title"><div><h2>买入批次</h2><span className="muted">按买入价从低到高排列{closed ? ' · ' + closed + ' 个已清批次可在交易中查看' : ''}</span></div><button className="tinted" onClick={buy}><Plus size={17} />登记买入</button></div>
       {position.active.length ? <div className="table-scroll"><table>
-        <thead><tr><th>买入时间 / 价格</th><th>原始 / 剩余股数</th><th>买入金额</th><th>买入费用</th><th>剩余成本</th><th>浮动盈亏</th></tr></thead>
+        <thead><tr><th>买入日期 / 价格</th><th>原始 / 剩余股数</th><th>买入金额</th><th>买入费用</th><th>剩余成本</th><th>浮动盈亏</th></tr></thead>
         <tbody>{position.active.map(lot => {
           const profit = stock.price * lot.remaining - remainingCost(lot);
-          return <tr key={lot.id}><td><strong>{money(lot.price)}</strong><small>{dateLabel(lot.time)}</small></td><td>{count(lot.quantity)} / <strong>{count(lot.remaining)}</strong></td>
-            <td>{money(lot.price * lot.quantity)}</td><td>{money(feeTotal(lot.fees))}</td><td>{money(remainingCost(lot))}</td><td className={tone(profit)}>{money(profit, true)}</td></tr>;
+          return <tr key={lot.id} className="purchase-row" onClick={() => setSelectedLotId(lot.id)}>
+            <td><button type="button" className="purchase-trigger" aria-haspopup="dialog"
+              aria-label={`查看 ${localDate(new Date(lot.time))} ${money(lot.price)} 买入批次`}>
+              <span><strong>{money(lot.price)}</strong><small>{localDate(new Date(lot.time))}</small></span><ChevronRight size={16} />
+            </button></td>
+            <td>{count(lot.quantity)} / <strong>{count(lot.remaining)}</strong></td>
+            <td>{money(lot.price * lot.quantity)}</td><td>{money(feeTotal(lot.fees))}</td>
+            <td>{money(remainingCost(lot))}</td><td className={tone(profit)}>{money(profit, true)}</td>
+          </tr>;
         })}</tbody>
       </table></div> : <p className="muted">暂无剩余买入批次。</p>}
     </section>
-    <div className="actions spread"><button className="danger" onClick={remove}>删除股票</button><button className="primary" onClick={sell}><Calculator size={17} />卖出测算</button></div>
+    {selectedLotId && <BottomSheet title="买入批次" close={() => setSelectedLotId(undefined)}>
+        {selectedLot && selectedPurchase ? <>
+          <dl className="detail-metrics">
+            <Metric label="买入日期">{localDate(new Date(selectedLot.time))}</Metric>
+            <Metric label="买入单价">{money(selectedLot.price)}</Metric>
+            <Metric label="原始股数">{count(selectedLot.quantity)}</Metric>
+            <Metric label="剩余股数">{count(selectedLot.remaining)}</Metric>
+            <Metric label="买入金额">{money(selectedLot.price * selectedLot.quantity)}</Metric>
+            <Metric label="买入费用">{money(feeTotal(selectedLot.fees))}</Metric>
+            <Metric label="剩余成本">{money(remainingCost(selectedLot))}</Metric>
+            <Metric label="浮动盈亏" className={tone(stock.price * selectedLot.remaining - remainingCost(selectedLot))}>
+              {money(stock.price * selectedLot.remaining - remainingCost(selectedLot), true)}
+            </Metric>
+          </dl>
+          {selectedPurchase.note && <p className="note">{selectedPurchase.note}</p>}
+          {matchedPurchases.has(selectedPurchase.id) ? <p className="muted">这笔买入订单已关联卖出。</p> : <>
+            {selectedPurchase.fills.length > 1 && <p className="muted">整笔买入订单包含 {count(selectedPurchase.fills.length)} 笔分笔成交。</p>}
+            <div className="purchase-sheet-actions">
+              <button type="button" className="primary" onClick={() => actOnPurchase(editPurchase, selectedPurchase)}>编辑订单</button>
+              <button type="button" className="danger" onClick={() => actOnPurchase(removePurchase, selectedPurchase)}>删除订单</button>
+            </div>
+          </>}
+        </> : <p className="muted">当前没有可查看的批次。</p>}
+    </BottomSheet>}
+    <div className="actions spread"><button className="danger" onClick={remove}>删除股票</button><button className="primary" onClick={sell}>卖出</button></div>
   </>;
 }
 
@@ -150,7 +198,7 @@ export function Transactions({ ledger, sales, lots }: Projection & { ledger: Led
       return <details className="panel transaction" key={order.id}>
         <summary>
           <span className={'trade-tag ' + (sale ? 'sell-tag' : '')}>{sale ? '卖出' : '买入'}</span>
-          <span><strong>{stock.name} <small>{stock.code}</small></strong><small>{dateLabel(order.time)}</small></span>
+          <span><strong>{stock.name} <small>{stock.code}</small></strong><small>{order.kind === 'buy' ? localDate(new Date(order.time)) : dateLabel(order.time)}</small></span>
           <span className="transaction-value"><strong className={sale ? tone(sale.net) : ''}>{sale ? money(sale.net, true) : money(amountOf(order.fills))}</strong><small>{sale ? '净收益 · ' + rateLabel(sale.netRate) : '买入金额'}</small></span>
           <ChevronRight className="transaction-arrow" size={16} />
         </summary>

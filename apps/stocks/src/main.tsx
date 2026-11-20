@@ -3,10 +3,11 @@ import { createRoot } from 'react-dom/client';
 import { ArrowLeft, ChartNoAxesCombined, ChartPie, History, RefreshCw, Settings2, Wallet } from 'lucide-react';
 import { readStored, saveStored } from '@pwa-apps/shared';
 import { bundledToken, downloadLedger, SyncConflict, syncGithub, type SyncDirection } from './backup.ts';
-import { emptyLedger, project, registerSale, validateLedger, type Ledger, type Stock } from './domain.ts';
+import { emptyLedger, project, registerSale, validateLedger, type Buy, type Ledger, type Stock } from './domain.ts';
 import { OrderEditor } from './orders.tsx';
 import { Portfolio, Settings, Statistics, StockDetail, StockEditor, Transactions, type SyncConfig } from './pages.tsx';
 import { readLocal, updateLocal, type LocalState } from './store.ts';
+import { BottomSheet } from './sheet.tsx';
 import './style.css';
 
 const navigation = [
@@ -16,11 +17,12 @@ const navigation = [
   { id: 'settings', label: '设置', icon: Settings2 },
 ] as const;
 type Tab = typeof navigation[number]['id'];
-type Screen = { name: Tab | 'add' } | { name: 'detail' | 'edit' | 'buy' | 'sell'; id: string };
+type Screen = { name: Tab | 'add' } | { name: 'detail' | 'edit' | 'sell'; id: string };
 
 function App() {
   const [local, setLocal] = useState<LocalState>();
   const [screen, setScreen] = useState<Screen>({ name: 'portfolio' });
+  const [buySheet, setBuySheet] = useState<{ stockId: string; purchaseId?: string }>();
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ text: string; error?: boolean }>();
   const [conflict, setConflict] = useState(false);
@@ -57,9 +59,13 @@ function App() {
   const ledger = local?.ledger;
   const projection = useMemo(() => project(ledger?.orders ?? []), [ledger]);
   const stock = 'id' in screen ? ledger?.stocks.find(item => item.id === screen.id) : undefined;
+  const buyStock = ledger?.stocks.find(item => item.id === buySheet?.stockId);
+  const purchase = buySheet?.purchaseId
+    ? ledger?.orders.find((order): order is Buy => order.kind === 'buy' && order.id === buySheet.purchaseId)
+    : undefined;
   const tab = navigation.find(item => item.id === screen.name);
   const title = screen.name === 'add' ? '添加股票' : screen.name === 'edit' ? '编辑股票' :
-    screen.name === 'buy' ? '登记买入' : screen.name === 'sell' ? '卖出测算' :
+    screen.name === 'sell' ? '卖出' :
       screen.name === 'detail' ? stock?.name : tab?.label;
 
   function go(next: Screen) {
@@ -86,7 +92,7 @@ function App() {
     }
   }
 
-  function change(update: (current: Ledger) => Ledger, message: string, nextScreen?: Screen, extra?: (current: LocalState) => LocalState) {
+  function change(update: (current: Ledger) => Ledger, message: string, afterSave?: Screen | (() => void), extra?: (current: LocalState) => LocalState) {
     if (!local) return;
     void run(async () => {
       const saved = await updateLocal(local.ledger.revision, current => ({
@@ -95,7 +101,8 @@ function App() {
       }));
       setLocal(saved);
       channel.current?.postMessage('update');
-      if (nextScreen) go(nextScreen);
+      if (typeof afterSave === 'function') afterSave();
+      else if (afterSave) go(afterSave);
       setFeedback({ text: message });
     });
   }
@@ -113,6 +120,21 @@ function App() {
       stocks: current.stocks.filter(item => item.id !== target.id),
       orders: current.orders.filter(order => order.stockId !== target.id),
     }), '股票已删除', { name: 'portfolio' });
+  }
+
+  function openBuy(stockId: string, purchaseId?: string) {
+    setFeedback(undefined);
+    setBuySheet({ stockId, purchaseId });
+  }
+
+  function closeBuy() {
+    setBuySheet(undefined);
+    setFeedback(undefined);
+  }
+
+  function removePurchase(order: Buy) {
+    if (!window.confirm('删除这笔买入订单及其全部分笔成交？')) return;
+    change(current => ({ ...current, orders: current.orders.filter(item => item.id !== order.id) }), '买入已删除');
   }
 
   function updateConfig(next: SyncConfig) {
@@ -163,24 +185,43 @@ function App() {
         </div>
         {busy && <span className="busy" role="status"><RefreshCw size={16} /> 处理中</span>}
       </div>
-      {feedback && <div className={'feedback ' + (feedback.error ? 'error' : '')} role={feedback.error ? 'alert' : 'status'}>{feedback.text}</div>}
+      {feedback && !buySheet && <div className={'feedback ' + (feedback.error ? 'error' : '')} role={feedback.error ? 'alert' : 'status'}>{feedback.text}</div>}
       {!local || !ledger ? <div className="panel muted">{feedback?.error
         ? <button onClick={() => void run(async () => setLocal(await readLocal()))}>重新读取数据</button>
         : '正在读取本机数据…'}</div> : <>
         {screen.name === 'portfolio' && <Portfolio ledger={ledger} {...projection}
-          add={() => go({ name: 'add' })} detail={id => go({ name: 'detail', id })} calculate={id => go({ name: 'sell', id })} />}
+          add={() => go({ name: 'add' })} detail={id => go({ name: 'detail', id })}
+          buy={openBuy} sell={id => go({ name: 'sell', id })} />}
         {screen.name === 'detail' && stock && <StockDetail ledger={ledger} stock={stock} {...projection}
-          edit={() => go({ name: 'edit', id: stock.id })} buy={() => go({ name: 'buy', id: stock.id })}
-          sell={() => go({ name: 'sell', id: stock.id })} remove={() => removeStock(stock)} />}
+          edit={() => go({ name: 'edit', id: stock.id })} buy={() => openBuy(stock.id)}
+          sell={() => go({ name: 'sell', id: stock.id })} editPurchase={order => openBuy(order.stockId, order.id)} removePurchase={removePurchase} remove={() => removeStock(stock)} />}
         {(screen.name === 'add' || screen.name === 'edit' && stock) && <StockEditor key={stock?.id ?? 'new'} stock={stock} ledger={ledger} save={saveStock} busy={busy} />}
-        {(screen.name === 'buy' || screen.name === 'sell') && stock && <OrderEditor key={screen.name + stock.id}
-          kind={screen.name} stock={stock} lots={projection.lots} profile={ledger.profile} busy={busy}
+        {screen.name === 'sell' && stock && <OrderEditor key={stock.id} kind="sell"
+          stock={stock} lots={projection.lots} profile={ledger.profile} busy={busy}
           save={draft => {
             const order = { ...draft, id: crypto.randomUUID(), stockId: stock.id, profile: ledger.profile };
-            change(current => ({ ...current, orders: [...current.orders, screen.name === 'sell'
-              ? registerSale(current, order) : { ...order, kind: 'buy' }] }), screen.name === 'sell' ? '实际卖出已登记' : '买入已登记',
-              { name: 'detail', id: stock.id });
+            change(current => ({ ...current, orders: [...current.orders, registerSale(current, order)] }),
+              '实际卖出已登记', { name: 'detail', id: stock.id });
           }} />}
+        {buySheet && <BottomSheet title={buySheet.purchaseId ? '编辑买入' : '登记买入'} close={closeBuy} busy={busy}>
+          {feedback?.error && <div className="feedback error" role="alert">{feedback.text}</div>}
+          {buyStock && (!buySheet.purchaseId || purchase) ? <>
+            <p className="muted">{buyStock.name} · {buyStock.market} {buyStock.code}</p>
+            <OrderEditor key={purchase?.id ?? buyStock.id} kind="buy" stock={buyStock}
+              lots={projection.lots} profile={purchase?.profile ?? ledger.profile} busy={busy} purchase={purchase}
+              save={draft => {
+                const afterSave = () => setBuySheet(undefined);
+                if (purchase) {
+                  change(current => ({ ...current, orders: current.orders.map(order =>
+                    order.id === purchase.id ? { ...purchase, ...draft } : order
+                  ) }), '买入已更新', afterSave);
+                } else {
+                  const order: Buy = { ...draft, kind: 'buy', id: crypto.randomUUID(), stockId: buyStock.id, profile: ledger.profile };
+                  change(current => ({ ...current, orders: [...current.orders, order] }), '买入已登记', afterSave);
+                }
+              }} />
+          </> : <p className="muted">{buyStock ? '这笔买入订单已从本机账簿移除。' : '这只股票已从本机账簿移除。'}</p>}
+        </BottomSheet>}
         {'id' in screen && !stock && <div className="panel muted">这只股票已从本机账簿移除。</div>}
         {screen.name === 'trades' && <Transactions ledger={ledger} {...projection} />}
         {screen.name === 'stats' && <Statistics ledger={ledger} sales={projection.sales} />}

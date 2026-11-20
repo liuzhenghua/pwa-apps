@@ -2,9 +2,9 @@ import { useId, useState, type FormEvent } from 'react';
 import { Minus, Plus, Trash2 } from 'lucide-react';
 import {
   amountOf, breakEven, calculateSale, cents, eligibleLots, estimateFees, feeFields, feeTotal,
-  shares, sum, type Fees, type Fill, type Lot, type OrderKind, type Profile, type Sale, type Stock,
+  shares, sum, type Buy, type Fees, type Fill, type Lot, type OrderKind, type Profile, type Sale, type Stock,
 } from './domain.ts';
-import { count, dateLabel, localTime, money, priceInput, rateLabel, tone } from './format.ts';
+import { count, localDate, localTime, money, priceInput, rateLabel, tone } from './format.ts';
 
 export const feeLabels = {
   commission: '佣金', stamp: '印花税', transfer: '过户费', regulatory: '经手费及证管费', other: '其他费用',
@@ -18,9 +18,9 @@ export function FeesList({ fees }: { fees: Fees }) {
 
 export function SaleMatches({ sale }: { sale: Sale }) {
   return <div className="table-scroll"><table>
-    <thead><tr><th>买入时间 / 价格</th><th>匹配股数</th><th>买入金额</th><th>买入费用</th><th>卖出金额</th><th>价差收益</th></tr></thead>
+    <thead><tr><th>买入日期 / 价格</th><th>匹配股数</th><th>买入金额</th><th>买入费用</th><th>卖出金额</th><th>价差收益</th></tr></thead>
     <tbody>{sale.matches.map(match => <tr key={match.lotId}>
-      <td><strong>{money(match.price)}</strong><small>{dateLabel(match.time)}</small></td>
+      <td><strong>{money(match.price)}</strong><small>{localDate(new Date(match.time))}</small></td>
       <td>{count(match.quantity)}</td><td>{money(match.buyAmount)}</td><td>{money(feeTotal(match.buyFees))}</td>
       <td>{money(match.sellAmount)}</td><td className={tone(match.gross)}>{money(match.gross, true)}</td>
     </tr>)}</tbody>
@@ -41,21 +41,29 @@ type Props = {
   kind: OrderKind;
   profile: Profile;
   busy: boolean;
+  purchase?: Buy;
   save: (draft: Draft) => void;
 };
 
-export function OrderEditor({ stock, lots, kind, profile, busy, save }: Props) {
+export function OrderEditor({ stock, lots, kind, profile, busy, purchase, save }: Props) {
   const editorId = useId();
-  const [register, setRegister] = useState(kind === 'buy');
-  const [date, setDate] = useState(localTime);
-  const [inputs, setInputs] = useState<FillInput[]>(() => [{
+  const buying = kind === 'buy';
+  const [register, setRegister] = useState(buying);
+  const [date, setDate] = useState(() => purchase ? localDate(new Date(purchase.time)) : buying ? localDate() : localTime());
+  const [inputs, setInputs] = useState<FillInput[]>(() => purchase ? purchase.fills.map((fill, index) => ({
+    id: String(index), price: priceInput(fill.price), quantity: String(fill.quantity),
+  })) : [{
     id: 'first', price: priceInput(stock.price),
     quantity: kind === 'sell' ? String(Math.min(100, sum(eligibleLots(lots, stock.id, new Date().toISOString()).map(lot => lot.remaining))) || '') : '',
   }]);
-  const [custom, setCustom] = useState(false);
-  const [manual, setManual] = useState<Record<keyof Fees, string>>();
-  const [note, setNote] = useState('');
-  const time = register ? new Date(date).getTime() : Date.now();
+  const [custom, setCustom] = useState(purchase?.feeSource === 'actual');
+  const [manual, setManual] = useState<Record<keyof Fees, string> | undefined>(() => purchase
+    ? Object.fromEntries(feeFields.map(field => [field, priceInput(purchase.fees[field])])) as Record<keyof Fees, string>
+    : undefined);
+  const [note, setNote] = useState(purchase?.note ?? '');
+  const dateInput = purchase && date === localDate(new Date(purchase.time))
+    ? purchase.time : buying ? date + 'T00:00:00' : date;
+  const time = register ? new Date(dateInput).getTime() : Date.now();
   const iso = Number.isFinite(time) ? new Date(time).toISOString() : '';
   const eligible = eligibleLots(lots, stock.id, iso);
   const available = sum(eligible.map(lot => lot.remaining));
@@ -66,8 +74,8 @@ export function OrderEditor({ stock, lots, kind, profile, busy, save }: Props) {
   let estimate: Fees | undefined;
   let problem = '';
   try {
-    if (!iso) throw Error('请输入有效的成交时间');
-    if (register && time > Date.now()) throw Error('成交时间不能晚于现在');
+    if (!iso) throw Error(buying ? '请输入有效的成交日期' : '请输入有效的成交时间');
+    if (register && time > Date.now()) throw Error(buying ? '成交日期不能晚于今天' : '成交时间不能晚于现在');
     const fills = inputs.map(input => ({ price: cents(input.price), quantity: shares(input.quantity) }));
     estimate = estimateFees(amountOf(fills), profile, kind);
     const fees = { ...estimate };
@@ -95,12 +103,12 @@ export function OrderEditor({ stock, lots, kind, profile, busy, save }: Props) {
 
   return <form className="order-layout" onSubmit={submit}>
     <section className="panel order-parameters">
-      <div className="section-title">
-        <h2>{kind === 'buy' ? '买入订单' : register ? '实际卖出订单' : '卖出参数'}</h2>
-        {kind === 'sell' && <span className="muted">可卖 {count(available)} 股</span>}
-      </div>
+      {!buying && <div className="section-title">
+        <h2>{register ? '实际卖出订单' : '卖出参数'}</h2>
+        <span className="muted">可卖 {count(available)} 股</span>
+      </div>}
       <fieldset disabled={busy}>
-        {register && <label>成交时间<input type="datetime-local" value={date} onChange={event => setDate(event.target.value)} required /></label>}
+        {register && <label>{buying ? '成交日期' : '成交时间'}<input type={buying ? 'date' : 'datetime-local'} max={buying ? localDate() : undefined} value={date} onChange={event => setDate(event.target.value)} required /></label>}
         {inputs.map((input, index) => <div className="fill" key={input.id}>
           <label>{inputs.length > 1 ? '成交 ' + (index + 1) + ' 单价' : kind === 'buy' ? '买入单价（元）' : '卖出单价（元）'}
             <input inputMode="decimal" value={input.price} onChange={event => patchFill(input.id, { price: event.target.value })} />
