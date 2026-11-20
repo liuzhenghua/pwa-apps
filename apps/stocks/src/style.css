@@ -93,6 +93,7 @@ dt { color: var(--muted); font-size: .8rem; }
 .panel > .lot-summary { font-size: .79rem; color: var(--muted); padding-top: 12px; border-top: 1px solid var(--line); margin-top: 14px; }
 .lot-summary span { margin-inline: 3px; }
 .card-actions { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 8px; margin-top: 10px; }
+.trade-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
 .detail-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 16px 10px; margin: 12px 0 3px; }
 .empty { text-align: center; padding: 36px 15px; }
 .empty p, .empty-result { color: var(--muted); }
@@ -148,9 +149,10 @@ td { border-bottom: 1px solid #e6edf7; }
 tr:last-child td { border-bottom: 0; }
 td small { margin-top: 2px; }
 .disclosure { border-top: 1px solid var(--line); margin-top: 11px; padding-top: 10px; }
-.disclosure summary, .transaction summary { cursor: pointer; font-weight: 650; font-size: .89rem; }
+.disclosure summary, .transaction-summary { cursor: pointer; font-weight: 650; font-size: .89rem; }
 .disclosure p { margin-top: 7px; }
-.fee-breakdown { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; margin-top: 12px; }
+.match-disclosure { margin: 0; padding: 0; border: 0; }
+.match-disclosure .table-scroll { margin-top: 8px; }
 .lines div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 7px 0; border-bottom: 1px solid #e7edf6; }
 .lines div:last-child { border-bottom: 0; }
 .lines dd { margin: 0; font-size: .86rem; text-align: right; }
@@ -159,7 +161,7 @@ td small { margin-top: 2px; }
 .panel > .actions { margin-top: 12px; }
 .spread { justify-content: space-between; }
 .transaction { padding-block: 0; }
-.transaction summary { min-height: 62px; display: flex; align-items: center; gap: 10px; list-style: none; }
+.transaction-summary { min-height: 62px; display: flex; align-items: center; gap: 10px; list-style: none; }
 .transaction summary::-webkit-details-marker { display: none; }
 .transaction small { font-weight: 500; margin-top: 2px; }
 .transaction strong small { display: inline; }
@@ -218,18 +220,16 @@ td small { margin-top: 2px; }
 .sync-dialog .wide { margin-top: 8px; }
 .sync-message { margin-top: 10px; }
 
-.purchase-row { cursor: pointer; }
-.purchase-row:hover, .purchase-row:focus-within { background: #f4f7ff; }
-.purchase-trigger, .purchase-trigger:hover:not(:disabled) {
-  justify-content: space-between;
+.transaction-trigger {
   width: 100%;
+  justify-content: flex-start;
   padding: 0;
   border: 0;
   color: inherit;
   background: transparent;
   text-align: left;
 }
-.purchase-trigger small { font-weight: 400; }
+.transaction-trigger:hover:not(:disabled) { background: transparent; }
 .purchase-sheet {
   inset: auto 0 0;
   margin: 0 auto;
@@ -279,9 +279,13 @@ td small { margin-top: 2px; }
   @keyframes purchase-sheet-enter { from { transform: translateY(100%); } }
 }
 .purchase-sheet .order-layout { max-width: none; }
-.purchase-sheet .order-parameters {
+.purchase-sheet .stock-editor { max-width: none; }
+.purchase-sheet .order-parameters,
+.purchase-sheet .stock-editor {
   margin: 16px 0 0;
   padding: 0;
   border: 0;
   box-shadow: none;
 }
+
+.purchase-sheet .transaction-body { border-top: 0; padding-bottom: 0; }

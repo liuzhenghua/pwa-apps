@@ -203,9 +203,10 @@ export function calculateSale(lots: Lot[], fills: Fill[], fees: Fees) {
   const buyFees = feeMap(field => sum(matches.map(match => match.buyFees[field])));
   const basis = sum([buyAmount, feeTotal(buyFees)]);
   const gross = sellAmount - buyAmount;
-  const net = sum([sellAmount, -sellFee, -basis]);
+  const proceeds = sellAmount - sellFee;
+  const net = sum([proceeds, -basis]);
   return {
-    quantity, sellAmount, buyAmount, basis, buyFees, fees, matches, gross, net,
+    quantity, sellAmount, proceeds, buyAmount, basis, buyFees, fees, matches, gross, net,
     grossRate: percent(gross, buyAmount), netRate: percent(net, basis),
   };
 }

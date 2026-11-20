@@ -17,11 +17,12 @@ const navigation = [
   { id: 'settings', label: '设置', icon: Settings2 },
 ] as const;
 type Tab = typeof navigation[number]['id'];
-type Screen = { name: Tab | 'add' } | { name: 'detail' | 'edit' | 'sell'; id: string };
+type Screen = { name: Tab | 'add' } | { name: 'detail' | 'sell'; id: string };
 
 function App() {
   const [local, setLocal] = useState<LocalState>();
   const [screen, setScreen] = useState<Screen>({ name: 'portfolio' });
+  const [editingStock, setEditingStock] = useState(false);
   const [buySheet, setBuySheet] = useState<{ stockId: string; purchaseId?: string }>();
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ text: string; error?: boolean }>();
@@ -64,7 +65,7 @@ function App() {
     ? ledger?.orders.find((order): order is Buy => order.kind === 'buy' && order.id === buySheet.purchaseId)
     : undefined;
   const tab = navigation.find(item => item.id === screen.name);
-  const title = screen.name === 'add' ? '添加股票' : screen.name === 'edit' ? '编辑股票' :
+  const title = screen.name === 'add' ? '添加股票' :
     screen.name === 'sell' ? '卖出' :
       screen.name === 'detail' ? stock?.name : tab?.label;
 
@@ -110,7 +111,7 @@ function App() {
   function saveStock(value: Stock) {
     change(current => ({ ...current, stocks: stock
       ? current.stocks.map(item => item.id === value.id ? value : item)
-      : [...current.stocks, value] }), '股票已保存', { name: 'detail', id: value.id });
+      : [...current.stocks, value] }), '股票已保存', stock ? () => setEditingStock(false) : { name: 'detail', id: value.id });
   }
 
   function removeStock(target: Stock) {
@@ -119,7 +120,10 @@ function App() {
     change(current => ({ ...current,
       stocks: current.stocks.filter(item => item.id !== target.id),
       orders: current.orders.filter(order => order.stockId !== target.id),
-    }), '股票已删除', { name: 'portfolio' });
+    }), '股票已删除', () => {
+      setEditingStock(false);
+      go({ name: 'portfolio' });
+    });
   }
 
   function openBuy(stockId: string, purchaseId?: string) {
@@ -185,7 +189,7 @@ function App() {
         </div>
         {busy && <span className="busy" role="status"><RefreshCw size={16} /> 处理中</span>}
       </div>
-      {feedback && !buySheet && <div className={'feedback ' + (feedback.error ? 'error' : '')} role={feedback.error ? 'alert' : 'status'}>{feedback.text}</div>}
+      {feedback && !buySheet && !editingStock && <div className={'feedback ' + (feedback.error ? 'error' : '')} role={feedback.error ? 'alert' : 'status'}>{feedback.text}</div>}
       {!local || !ledger ? <div className="panel muted">{feedback?.error
         ? <button onClick={() => void run(async () => setLocal(await readLocal()))}>重新读取数据</button>
         : '正在读取本机数据…'}</div> : <>
@@ -193,9 +197,21 @@ function App() {
           add={() => go({ name: 'add' })} detail={id => go({ name: 'detail', id })}
           buy={openBuy} sell={id => go({ name: 'sell', id })} />}
         {screen.name === 'detail' && stock && <StockDetail ledger={ledger} stock={stock} {...projection}
-          edit={() => go({ name: 'edit', id: stock.id })} buy={() => openBuy(stock.id)}
-          sell={() => go({ name: 'sell', id: stock.id })} editPurchase={order => openBuy(order.stockId, order.id)} removePurchase={removePurchase} remove={() => removeStock(stock)} />}
-        {(screen.name === 'add' || screen.name === 'edit' && stock) && <StockEditor key={stock?.id ?? 'new'} stock={stock} ledger={ledger} save={saveStock} busy={busy} />}
+          edit={() => { setFeedback(undefined); setEditingStock(true); }} buy={() => openBuy(stock.id)}
+          sell={() => go({ name: 'sell', id: stock.id })} editPurchase={order => openBuy(order.stockId, order.id)} removePurchase={removePurchase} />}
+        {screen.name === 'add' && <StockEditor ledger={ledger} save={saveStock} busy={busy} />}
+        {editingStock && <BottomSheet title="编辑股票" busy={busy} close={() => {
+          setEditingStock(false);
+          setFeedback(undefined);
+        }}>
+          {feedback?.error && <div className="feedback error" role="alert">{feedback.text}</div>}
+          {stock ? <>
+            <StockEditor key={stock.id} stock={stock} ledger={ledger} save={saveStock} busy={busy} />
+            <div className="purchase-sheet-actions">
+              <button type="button" className="danger" disabled={busy} onClick={() => removeStock(stock)}>删除股票</button>
+            </div>
+          </> : <p className="muted">这只股票已从本机账簿移除。</p>}
+        </BottomSheet>}
         {screen.name === 'sell' && stock && <OrderEditor key={stock.id} kind="sell"
           stock={stock} lots={projection.lots} profile={ledger.profile} busy={busy}
           save={draft => {

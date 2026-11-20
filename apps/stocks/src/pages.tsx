@@ -62,18 +62,25 @@ export function Portfolio({ ledger, lots, sales, add, detail, buy, sell }: Proje
   </>;
 }
 
-export function StockDetail({ stock, ledger, lots, sales, edit, buy, sell, editPurchase, removePurchase, remove }: Projection & {
-  stock: Stock; ledger: Ledger; edit: () => void; buy: () => void; sell: () => void; remove: () => void;
+export function StockDetail({ stock, ledger, lots, sales, edit, buy, sell, editPurchase, removePurchase }: Projection & {
+  stock: Stock; ledger: Ledger; edit: () => void; buy: () => void; sell: () => void;
   editPurchase: (order: Buy) => void; removePurchase: (order: Buy) => void;
 }) {
   const [selectedLotId, setSelectedLotId] = useState<string>();
+  const [selectedSaleId, setSelectedSaleId] = useState<string>();
   const position = holding(stock, lots);
-  const net = sum(ledger.orders.filter(order => order.stockId === stock.id && order.kind === 'sell').map(order => sales.get(order.id)!.net));
+  const sellOrders = ledger.orders.filter(order => order.stockId === stock.id && order.kind === 'sell')
+    .reverse().sort((a, b) => b.time.localeCompare(a.time));
+  const net = sum(sellOrders.map(order => sales.get(order.id)!.net));
   const matchedPurchases = new Set(lots.filter(lot => lot.remaining < lot.quantity).map(lot => lot.orderId));
   const purchases = new Map(ledger.orders.filter(order => order.kind === 'buy').map(order => [order.id, order]));
   const closed = lots.filter(lot => lot.stockId === stock.id && lot.remaining === 0).length;
-  const selectedLot = position.active.find(lot => lot.id === selectedLotId);
+  const buyLots = lots.filter(lot => lot.stockId === stock.id && lot.remaining > 0)
+    .reverse().sort((a, b) => b.time.localeCompare(a.time));
+  const selectedLot = buyLots.find(lot => lot.id === selectedLotId);
   const selectedPurchase = selectedLot && purchases.get(selectedLot.orderId);
+  const selectedSaleOrder = sellOrders.find(order => order.id === selectedSaleId);
+  const selectedSale = selectedSaleOrder && sales.get(selectedSaleOrder.id);
 
   function actOnPurchase(action: (order: Buy) => void, order: Buy) {
     setSelectedLotId(undefined);
@@ -92,25 +99,53 @@ export function StockDetail({ stock, ledger, lots, sales, edit, buy, sell, editP
         <Metric label="浮动盈亏" className={tone(position.float)}>{money(position.float, true)}</Metric>
         <Metric label="已实现净收益" className={tone(net)}>{money(net, true)}</Metric>
       </dl>
+      <div className="trade-actions">
+        <button type="button" className="tinted" onClick={buy}>登记买入</button>
+        <button type="button" className="tinted" onClick={sell}>卖出</button>
+      </div>
     </section>
-    <section className="panel">
-      <div className="section-title"><div><h2>买入批次</h2><span className="muted">按买入价从低到高排列{closed ? ' · ' + closed + ' 个已清批次可在交易中查看' : ''}</span></div><button className="tinted" onClick={buy}><Plus size={17} />登记买入</button></div>
-      {position.active.length ? <div className="table-scroll"><table>
-        <thead><tr><th>买入日期 / 价格</th><th>原始 / 剩余股数</th><th>买入金额</th><th>买入费用</th><th>剩余成本</th><th>浮动盈亏</th></tr></thead>
-        <tbody>{position.active.map(lot => {
-          const profit = stock.price * lot.remaining - remainingCost(lot);
-          return <tr key={lot.id} className="purchase-row" onClick={() => setSelectedLotId(lot.id)}>
-            <td><button type="button" className="purchase-trigger" aria-haspopup="dialog"
-              aria-label={`查看 ${localDate(new Date(lot.time))} ${money(lot.price)} 买入批次`}>
-              <span><strong>{money(lot.price)}</strong><small>{localDate(new Date(lot.time))}</small></span><ChevronRight size={16} />
-            </button></td>
-            <td>{count(lot.quantity)} / <strong>{count(lot.remaining)}</strong></td>
-            <td>{money(lot.price * lot.quantity)}</td><td>{money(feeTotal(lot.fees))}</td>
-            <td>{money(remainingCost(lot))}</td><td className={tone(profit)}>{money(profit, true)}</td>
-          </tr>;
-        })}</tbody>
-      </table></div> : <p className="muted">暂无剩余买入批次。</p>}
+    <section aria-labelledby="stock-purchases-heading">
+      <div className="section-title list-heading">
+        <div><h2 id="stock-purchases-heading">买入批次</h2><span className="muted">按买入时间从新到旧{closed ? ' · ' + closed + ' 个已清批次可在交易中查看' : ''}</span></div>
+      </div>
+      {buyLots.length === 0 && <div className="panel muted">暂无剩余买入批次。</div>}
+      {buyLots.map(lot => {
+        const profit = stock.price * lot.remaining - remainingCost(lot);
+        return <div className="panel transaction" key={lot.id}>
+          <button type="button" className="transaction-summary transaction-trigger" aria-haspopup="dialog"
+            onClick={() => setSelectedLotId(lot.id)}>
+            <span><strong>{localDate(new Date(lot.time))}</strong><small>剩余 {count(lot.remaining)} 股</small></span>
+            <span className="transaction-value">
+              <strong>{money(lot.price)} / 股</strong><small>浮动盈亏 <span className={tone(profit)}>{money(profit, true)}</span></small>
+            </span>
+            <ChevronRight className="transaction-arrow" size={16} />
+          </button>
+        </div>;
+      })}
     </section>
+    <section aria-labelledby="stock-sales-heading">
+      <div className="section-title list-heading"><h2 id="stock-sales-heading">卖出记录</h2></div>
+      {sellOrders.length === 0 && <div className="panel muted">暂无卖出记录。</div>}
+      {sellOrders.map(order => {
+        const sale = sales.get(order.id)!;
+        return <div className="panel transaction" key={order.id}>
+          <button type="button" className="transaction-summary transaction-trigger" aria-haspopup="dialog"
+            onClick={() => setSelectedSaleId(order.id)}>
+            <span><strong>{dateLabel(order.time)}</strong><small>卖出 {count(sale.quantity)} 股</small></span>
+            <span className="transaction-value">
+              <strong>{money(sale.proceeds)}</strong><small>{proceedsLabel(order)} · 净收益 <span className={tone(sale.net)}>{money(sale.net, true)}</span></small>
+            </span>
+            <ChevronRight className="transaction-arrow" size={16} />
+          </button>
+        </div>;
+      })}
+    </section>
+    {selectedSaleId && <BottomSheet title="卖出记录" close={() => setSelectedSaleId(undefined)}>
+      {selectedSaleOrder && selectedSale ? <>
+        <p className="muted">{dateLabel(selectedSaleOrder.time)} · 净收益 <strong className={tone(selectedSale.net)}>{money(selectedSale.net, true)}（{rateLabel(selectedSale.netRate)}）</strong></p>
+        <TransactionDetails order={selectedSaleOrder} sale={selectedSale} />
+      </> : <p className="muted">这笔卖出记录已从本机账簿移除。</p>}
+    </BottomSheet>}
     {selectedLotId && <BottomSheet title="买入批次" close={() => setSelectedLotId(undefined)}>
         {selectedLot && selectedPurchase ? <>
           <dl className="detail-metrics">
@@ -135,7 +170,6 @@ export function StockDetail({ stock, ledger, lots, sales, edit, buy, sell, editP
           </>}
         </> : <p className="muted">当前没有可查看的批次。</p>}
     </BottomSheet>}
-    <div className="actions spread"><button className="danger" onClick={remove}>删除股票</button><button className="primary" onClick={sell}>卖出</button></div>
   </>;
 }
 
@@ -159,7 +193,7 @@ export function StockEditor({ stock, ledger, save, busy }: {
       setProblem(error instanceof Error ? error.message : '无法保存股票');
     }
   }
-  return <form className="panel narrow" onSubmit={submit}>
+  return <form className="panel narrow stock-editor" onSubmit={submit}>
     <fieldset disabled={busy} className="fields">
       <label>股票名称<input maxLength={40} required value={name} onChange={event => setName(event.target.value)} /></label>
       <label>股票代码<input required inputMode="numeric" maxLength={6} value={code} onChange={event => setCode(event.target.value)} /></label>
@@ -191,35 +225,52 @@ export function Transactions({ ledger, sales, lots }: Projection & { ledger: Led
       <label>结束日期<input type="date" min={since || undefined} value={until} onChange={event => setUntil(event.target.value)} /></label>
     </section>
     {orders.length === 0 && <Empty title="暂无符合条件的交易" />}
-    {orders.map(order => {
-      const sale = sales.get(order.id);
-      const stock = stocks.get(order.stockId)!;
-      const orderLots = order.kind === 'buy' ? lots.filter(lot => lot.orderId === order.id) : [];
-      return <details className="panel transaction" key={order.id}>
-        <summary>
-          <span className={'trade-tag ' + (sale ? 'sell-tag' : '')}>{sale ? '卖出' : '买入'}</span>
-          <span><strong>{stock.name} <small>{stock.code}</small></strong><small>{order.kind === 'buy' ? localDate(new Date(order.time)) : dateLabel(order.time)}</small></span>
-          <span className="transaction-value"><strong className={sale ? tone(sale.net) : ''}>{sale ? money(sale.net, true) : money(amountOf(order.fills))}</strong><small>{sale ? '净收益 · ' + rateLabel(sale.netRate) : '买入金额'}</small></span>
-          <ChevronRight className="transaction-arrow" size={16} />
-        </summary>
-        <div className="transaction-body">
-          <dl className="detail-metrics">
-            <Metric label="成交股数">{count(sum(order.fills.map(fill => fill.quantity)))}</Metric>
-            <Metric label="平均成交单价">{average(amountOf(order.fills), sum(order.fills.map(fill => fill.quantity)))}</Metric>
-            <Metric label="成交金额">{money(amountOf(order.fills))}</Metric>
-            {sale && <Metric label="毛收益 / 收益率" className={tone(sale.gross)}>{money(sale.gross, true)} · {rateLabel(sale.grossRate)}</Metric>}
-          </dl>
-          <h3>分笔成交</h3>
-          <dl className="lines">{order.fills.map((fill, index) => <div key={index}><dt>{money(fill.price)} × {count(fill.quantity)} 股</dt>
-            <dd>{sale ? money(amountOf([fill])) : '剩余 ' + count(orderLots[index].remaining) + ' 股'}</dd></div>)}</dl>
-          <h3>订单费用 · {order.feeSource === 'actual' ? '交割单' : '估算'}</h3>
-          <FeesList fees={order.fees} />
-          {sale && <><h3>匹配批次</h3><SaleMatches sale={sale} /><h3>分摊买入费用</h3><FeesList fees={sale.buyFees} /></>}
-          {order.note && <p className="note">{order.note}</p>}
-        </div>
-      </details>;
-    })}
+    {orders.map(order => <Transaction key={order.id} order={order} sale={sales.get(order.id)}
+      stock={stocks.get(order.stockId)!} orderLots={order.kind === 'buy' ? lots.filter(lot => lot.orderId === order.id) : []} />)}
   </>;
+}
+
+function proceedsLabel(order: Ledger['orders'][number]) {
+  return order.feeSource === 'actual' ? '本次到账' : '预计到账';
+}
+
+function Transaction({ order, sale, stock, orderLots }: {
+  order: Ledger['orders'][number]; sale?: Sale; stock: Stock; orderLots: Lot[];
+}) {
+  return <details className="panel transaction">
+    <summary className="transaction-summary">
+      <span className={'trade-tag ' + (sale ? 'sell-tag' : '')}>{sale ? '卖出' : '买入'}</span>
+      <span><strong>{stock.name} <small>{stock.code}</small></strong><small>{order.kind === 'buy' ? localDate(new Date(order.time)) : dateLabel(order.time)}</small></span>
+      <span className="transaction-value">
+        <strong className={sale ? tone(sale.net) : ''}>{sale ? money(sale.net, true) : money(amountOf(order.fills))}</strong>
+        <small>{sale ? '净收益 · ' + rateLabel(sale.netRate) : '买入金额'}</small>
+      </span>
+      <ChevronRight className="transaction-arrow" size={16} />
+    </summary>
+    <TransactionDetails order={order} sale={sale} orderLots={orderLots} />
+  </details>;
+}
+
+function TransactionDetails({ order, sale, orderLots = [] }: {
+  order: Ledger['orders'][number]; sale?: Sale; orderLots?: Lot[];
+}) {
+  const quantity = sum(order.fills.map(fill => fill.quantity));
+  const amount = amountOf(order.fills);
+  return <div className="transaction-body">
+    <dl className="detail-metrics">
+      <Metric label="成交股数">{count(quantity)}</Metric>
+      <Metric label="平均成交单价">{average(amount, quantity)}</Metric>
+      <Metric label="成交金额">{money(amount)}</Metric>
+      {sale && <Metric label={proceedsLabel(order)}>{money(sale.proceeds)}</Metric>}
+    </dl>
+    <h3>分笔成交</h3>
+    <dl className="lines">{order.fills.map((fill, index) => <div key={index}><dt>{money(fill.price)} × {count(fill.quantity)} 股</dt>
+      <dd>{sale ? money(amountOf([fill])) : '剩余 ' + count(orderLots[index].remaining) + ' 股'}</dd></div>)}</dl>
+    <h3>订单费用 · {order.feeSource === 'actual' ? '交割单' : '估算'}</h3>
+    <FeesList fees={order.fees} />
+    {sale && <><h3>匹配批次</h3><SaleMatches sale={sale} /></>}
+    {order.note && <p className="note">{order.note}</p>}
+  </div>;
 }
 
 export function Statistics({ ledger, sales }: { ledger: Ledger; sales: Projection['sales'] }) {

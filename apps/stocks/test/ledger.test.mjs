@@ -35,6 +35,7 @@ test('spec example matches the cheapest lots and yields ¥294.82 at 2.54%', () =
   assert.equal(sale.gross, 31300);
   assert.equal(feeTotal(sale.buyFees), 711);
   assert.equal(feeTotal(sale.fees), 1107);
+  assert.equal(sale.proceeds, 1188393);
   assert.equal(sale.net, 29482);
   assert.equal(sale.netRate.toFixed(2), '2.54');
   assert.equal(sale.basis, 1158911);

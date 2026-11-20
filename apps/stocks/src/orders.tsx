@@ -18,10 +18,10 @@ export function FeesList({ fees }: { fees: Fees }) {
 
 export function SaleMatches({ sale }: { sale: Sale }) {
   return <div className="table-scroll"><table>
-    <thead><tr><th>买入日期 / 价格</th><th>匹配股数</th><th>买入金额</th><th>买入费用</th><th>卖出金额</th><th>价差收益</th></tr></thead>
+    <thead><tr><th>买入日期 / 价格</th><th>匹配股数</th><th>买入金额</th><th>卖出金额</th><th>价差收益</th></tr></thead>
     <tbody>{sale.matches.map(match => <tr key={match.lotId}>
       <td><strong>{money(match.price)}</strong><small>{localDate(new Date(match.time))}</small></td>
-      <td>{count(match.quantity)}</td><td>{money(match.buyAmount)}</td><td>{money(feeTotal(match.buyFees))}</td>
+      <td>{count(match.quantity)}</td><td>{money(match.buyAmount)}</td>
       <td>{money(match.sellAmount)}</td><td className={tone(match.gross)}>{money(match.gross, true)}</td>
     </tr>)}</tbody>
   </table></div>;
@@ -145,21 +145,24 @@ export function OrderEditor({ stock, lots, kind, profile, busy, purchase, save }
     {kind === 'sell' && <div className="order-result" aria-live="polite">
       {sale && floor !== undefined ? <>
         <section className="panel result-card">
-          <div className="muted">{register ? '本次净收益' : sale.net < 0 ? '预计净亏损' : sale.net > 0 ? '预计净盈利' : '预计净收益 · 持平'}</div>
-          <div className={'result-number ' + tone(sale.net)}>{money(sale.net, true)} <span>{rateLabel(sale.netRate)}</span></div>
+          <div className="muted">{register && custom ? '本次到账' : '预计到账'}</div>
+          <div className="result-number">{money(sale.proceeds)}</div>
           <dl className="result-metrics">
-            <div><dt>毛收益 / 收益率</dt><dd className={tone(sale.gross)}>{money(sale.gross, true)} <small>{rateLabel(sale.grossRate)}</small></dd></div>
+            <div><dt>净收益 / 收益率</dt><dd className={tone(sale.net)}>{money(sale.net, true)} <small>{rateLabel(sale.netRate)}</small></dd></div>
             <div><dt>保本卖出价</dt><dd>{money(floor)} <small>/ 股</small></dd></div>
             <div><dt>卖出后剩余</dt><dd>{count(stockQuantity - sale.quantity)} <small>股</small></dd></div>
           </dl>
+          <details className="disclosure">
+            <summary>卖出费用 {money(feeTotal(sale.fees))}</summary>
+            <p className="muted">成交金额 {money(sale.sellAmount)}，扣除以下费用后到账。</p>
+            <FeesList fees={sale.fees} />
+          </details>
         </section>
         <section className="panel">
-          <div className="section-title"><h2>匹配批次</h2><span className="muted">最低买入价优先</span></div>
-          <SaleMatches sale={sale} />
-          <details className="disclosure">
-            <summary>费用合计 {money(sum([feeTotal(sale.buyFees), feeTotal(sale.fees)]))}</summary>
-            <div className="fee-breakdown"><div><h3>分摊买入费用</h3><FeesList fees={sale.buyFees} /></div><div><h3>卖出费用</h3><FeesList fees={sale.fees} /></div></div>
-            <p className="muted">净收益 = 毛收益 − 分摊买入费用 − 卖出费用</p>
+          <details className="disclosure match-disclosure">
+            <summary>匹配批次 · {count(sale.matches.length)} 笔</summary>
+            <p className="muted">最低买入价优先</p>
+            <SaleMatches sale={sale} />
           </details>
         </section>
       </> : <section className="panel empty-result">输入有效的卖出价格和股数后查看收益。</section>}
