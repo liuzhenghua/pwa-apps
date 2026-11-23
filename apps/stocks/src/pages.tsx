@@ -1,238 +1,13 @@
-import { useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { Calculator, ChevronRight, Cloud, Download, Plus, Upload } from 'lucide-react';
-import {
-  amountOf, average, cents, feeFields, feeTotal, holding, percent, remainingCost, sum, validateProfile,
-  type Ledger, type Lot, type Profile, type Sale, type Stock,
-} from './domain.ts';
+import { useRef, useState } from 'react';
+import { Cloud, Download, Upload } from 'lucide-react';
 import { bundledToken, repository, type SyncDirection } from './backup.ts';
-import { count, dateLabel, localDate, money, priceInput, rateLabel, tone } from './format.ts';
-import { feeLabels, FeesList, SaleMatches } from './orders.tsx';
+import { dateLabel } from './format.ts';
 import type { LocalState } from './store.ts';
 
-export function Metric({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
-  return <div><dt>{label}</dt><dd className={className}>{children}</dd></div>;
-}
-
-export function Empty({ title, children }: { title: string; children?: ReactNode }) {
-  return <div className="panel empty"><div className="empty-symbol"><Calculator size={25} /></div><h2>{title}</h2>{children}</div>;
-}
-
-type Projection = { lots: Lot[]; sales: Map<string, Sale> };
-
-export function Portfolio({ ledger, lots, sales, add, detail, calculate }: Projection & {
-  ledger: Ledger; add: () => void; detail: (id: string) => void; calculate: (id: string) => void;
-}) {
-  const holdings = ledger.stocks.map(stock => ({ stock, ...holding(stock, lots) }));
-  const marketValue = sum(holdings.map(item => item.marketValue));
-  const cost = sum(holdings.map(item => item.cost));
-  const net = sum([...sales.values()].map(sale => sale.net));
-  return <>
-    <section className="overview">
-      <div className="overview-main"><div>持仓总市值</div><strong>{money(marketValue)}</strong></div>
-      <dl className="overview-metrics">
-        <Metric label="持仓成本">{money(cost)}</Metric>
-        <Metric label="浮动盈亏" className={tone(marketValue - cost)}>{money(marketValue - cost, true)}</Metric>
-        <Metric label="已实现净收益" className={tone(net)}>{money(net, true)}</Metric>
-      </dl>
-    </section>
-    <div className="section-title list-heading"><div><h2>我的持仓</h2><span className="muted">{ledger.stocks.length} 只股票</span></div><button className="primary" onClick={add}><Plus size={17} />添加股票</button></div>
-    {!holdings.length && <Empty title="还没有股票"><p>添加股票并记录买入，即可按批次测算卖出收益。</p></Empty>}
-    <div className="stock-grid">
-      {holdings.map(({ stock, active, quantity, cost: basis, float }) =>
-        <article className="panel stock-card" key={stock.id}>
-          <div className="stock-head">
-            <div><h3>{stock.name}</h3><p className="muted">{stock.market} · {stock.code}</p></div>
-            <div className="quote"><strong>{money(stock.price)}</strong><span>手动报价</span></div>
-          </div>
-          <dl className="stock-metrics">
-            <Metric label="持仓股数">{count(quantity)}</Metric>
-            <Metric label="持仓均价">{average(basis, quantity)}</Metric>
-            <Metric label="浮动盈亏" className={tone(float)}>{money(float, true)}<small>{rateLabel(percent(float, basis))}</small></Metric>
-          </dl>
-          <p className="lot-summary">{active.length} 个未清批次 <span>·</span> 最低买入价 {active.length ? money(active[0].price) : '—'}</p>
-          <div className="card-actions"><button onClick={() => detail(stock.id)}>查看详情 <ChevronRight size={16} /></button><button className="tinted" onClick={() => calculate(stock.id)}><Calculator size={16} /> 卖出测算</button></div>
-        </article>
-      )}
-    </div>
-  </>;
-}
-
-export function StockDetail({ stock, ledger, lots, sales, edit, buy, sell, remove }: Projection & {
-  stock: Stock; ledger: Ledger; edit: () => void; buy: () => void; sell: () => void; remove: () => void;
-}) {
-  const position = holding(stock, lots);
-  const net = sum(ledger.orders.filter(order => order.stockId === stock.id && order.kind === 'sell').map(order => sales.get(order.id)!.net));
-  const closed = lots.filter(lot => lot.stockId === stock.id && lot.remaining === 0).length;
-  return <>
-    <section className="panel">
-      <div className="section-title">
-        <div><h2>{stock.market} · {stock.code}</h2><span className="muted">报价更新于 {dateLabel(stock.priceUpdatedAt)}</span></div>
-        <button onClick={edit}>编辑股票</button>
-      </div>
-      <dl className="detail-metrics">
-        <Metric label="当前价格">{money(stock.price)}</Metric><Metric label="持仓股数">{count(position.quantity)}</Metric>
-        <Metric label="持仓成本">{money(position.cost)}</Metric><Metric label="持仓均价">{average(position.cost, position.quantity)}</Metric>
-        <Metric label="浮动盈亏" className={tone(position.float)}>{money(position.float, true)}</Metric>
-        <Metric label="已实现净收益" className={tone(net)}>{money(net, true)}</Metric>
-      </dl>
-    </section>
-    <section className="panel">
-      <div className="section-title"><div><h2>买入批次</h2><span className="muted">按买入价从低到高排列{closed ? ' · ' + closed + ' 个已清批次可在交易中查看' : ''}</span></div><button className="tinted" onClick={buy}><Plus size={17} />登记买入</button></div>
-      {position.active.length ? <div className="table-scroll"><table>
-        <thead><tr><th>买入时间 / 价格</th><th>原始 / 剩余股数</th><th>买入金额</th><th>买入费用</th><th>剩余成本</th><th>浮动盈亏</th></tr></thead>
-        <tbody>{position.active.map(lot => {
-          const profit = stock.price * lot.remaining - remainingCost(lot);
-          return <tr key={lot.id}><td><strong>{money(lot.price)}</strong><small>{dateLabel(lot.time)}</small></td><td>{count(lot.quantity)} / <strong>{count(lot.remaining)}</strong></td>
-            <td>{money(lot.price * lot.quantity)}</td><td>{money(feeTotal(lot.fees))}</td><td>{money(remainingCost(lot))}</td><td className={tone(profit)}>{money(profit, true)}</td></tr>;
-        })}</tbody>
-      </table></div> : <p className="muted">暂无剩余买入批次。</p>}
-    </section>
-    <div className="actions spread"><button className="danger" onClick={remove}>删除股票</button><button className="primary" onClick={sell}><Calculator size={17} />卖出测算</button></div>
-  </>;
-}
-
-export function StockEditor({ stock, ledger, save, busy }: {
-  stock?: Stock; ledger: Ledger; save: (stock: Stock) => void; busy: boolean;
-}) {
-  const [name, setName] = useState(stock?.name ?? '');
-  const [code, setCode] = useState(stock?.code ?? '');
-  const [market, setMarket] = useState<Stock['market']>(stock?.market ?? '沪市');
-  const [price, setPrice] = useState(stock ? priceInput(stock.price) : '');
-  const [problem, setProblem] = useState('');
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    try {
-      if (!name.trim() || !/^\d{6}$/.test(code.trim())) throw Error('请输入股票名称和六位股票代码');
-      if (ledger.stocks.some(item => item.id !== stock?.id && item.market === market && item.code === code.trim())) throw Error('这只股票已经存在');
-      const quote = cents(price);
-      save({ id: stock?.id ?? crypto.randomUUID(), name: name.trim(), code: code.trim(), market, price: quote,
-        priceUpdatedAt: stock?.price === quote ? stock.priceUpdatedAt : new Date().toISOString() });
-    } catch (error) {
-      setProblem(error instanceof Error ? error.message : '无法保存股票');
-    }
-  }
-  return <form className="panel narrow" onSubmit={submit}>
-    <fieldset disabled={busy} className="fields">
-      <label>股票名称<input maxLength={40} required value={name} onChange={event => setName(event.target.value)} /></label>
-      <label>股票代码<input required inputMode="numeric" maxLength={6} value={code} onChange={event => setCode(event.target.value)} /></label>
-      <label>交易市场<select value={market} onChange={event => setMarket(event.target.value as Stock['market'])}><option>沪市</option><option>深市</option></select></label>
-      <label>当前价格（元）<input required inputMode="decimal" value={price} onChange={event => setPrice(event.target.value)} /></label>
-    </fieldset>
-    {problem && <p className="form-message" role="alert">{problem}</p>}
-    <button className="primary wide" disabled={busy}>保存股票</button>
-  </form>;
-}
-
-export function Transactions({ ledger, sales, lots }: Projection & { ledger: Ledger }) {
-  const [symbol, setSymbol] = useState('');
-  const [kind, setKind] = useState('');
-  const [since, setSince] = useState('');
-  const [until, setUntil] = useState('');
-  const orders = ledger.orders.filter(order => {
-    const day = localDate(new Date(order.time));
-    return (!symbol || order.stockId === symbol) && (!kind || order.kind === kind) &&
-      (!since || day >= since) && (!until || day <= until);
-  }).reverse().sort((a, b) => b.time.localeCompare(a.time));
-  const stocks = new Map(ledger.stocks.map(stock => [stock.id, stock]));
-  return <>
-    <section className="panel filters">
-      <label>股票<select value={symbol} onChange={event => setSymbol(event.target.value)}><option value="">全部股票</option>
-        {ledger.stocks.map(stock => <option value={stock.id} key={stock.id}>{stock.name} · {stock.code}</option>)}</select></label>
-      <label>交易类型<select value={kind} onChange={event => setKind(event.target.value)}><option value="">全部交易</option><option value="buy">买入</option><option value="sell">卖出</option></select></label>
-      <label>起始日期<input type="date" max={until || undefined} value={since} onChange={event => setSince(event.target.value)} /></label>
-      <label>结束日期<input type="date" min={since || undefined} value={until} onChange={event => setUntil(event.target.value)} /></label>
-    </section>
-    {orders.length === 0 && <Empty title="暂无符合条件的交易" />}
-    {orders.map(order => {
-      const sale = sales.get(order.id);
-      const stock = stocks.get(order.stockId)!;
-      const orderLots = order.kind === 'buy' ? lots.filter(lot => lot.orderId === order.id) : [];
-      return <details className="panel transaction" key={order.id}>
-        <summary>
-          <span className={'trade-tag ' + (sale ? 'sell-tag' : '')}>{sale ? '卖出' : '买入'}</span>
-          <span><strong>{stock.name} <small>{stock.code}</small></strong><small>{dateLabel(order.time)}</small></span>
-          <span className="transaction-value"><strong className={sale ? tone(sale.net) : ''}>{sale ? money(sale.net, true) : money(amountOf(order.fills))}</strong><small>{sale ? '净收益 · ' + rateLabel(sale.netRate) : '买入金额'}</small></span>
-          <ChevronRight className="transaction-arrow" size={16} />
-        </summary>
-        <div className="transaction-body">
-          <dl className="detail-metrics">
-            <Metric label="成交股数">{count(sum(order.fills.map(fill => fill.quantity)))}</Metric>
-            <Metric label="平均成交单价">{average(amountOf(order.fills), sum(order.fills.map(fill => fill.quantity)))}</Metric>
-            <Metric label="成交金额">{money(amountOf(order.fills))}</Metric>
-            {sale && <Metric label="毛收益 / 收益率" className={tone(sale.gross)}>{money(sale.gross, true)} · {rateLabel(sale.grossRate)}</Metric>}
-          </dl>
-          <h3>分笔成交</h3>
-          <dl className="lines">{order.fills.map((fill, index) => <div key={index}><dt>{money(fill.price)} × {count(fill.quantity)} 股</dt>
-            <dd>{sale ? money(amountOf([fill])) : '剩余 ' + count(orderLots[index].remaining) + ' 股'}</dd></div>)}</dl>
-          <h3>订单费用 · {order.feeSource === 'actual' ? '交割单' : '估算'}</h3>
-          <FeesList fees={order.fees} />
-          {sale && <><h3>匹配批次</h3><SaleMatches sale={sale} /><h3>分摊买入费用</h3><FeesList fees={sale.buyFees} /></>}
-          {order.note && <p className="note">{order.note}</p>}
-        </div>
-      </details>;
-    })}
-  </>;
-}
-
-export function Statistics({ ledger, sales }: { ledger: Ledger; sales: Projection['sales'] }) {
-  const realized = [...sales.values()];
-  const net = sum(realized.map(sale => sale.net));
-  const averageRate = realized.length ? realized.reduce((total, sale) => total + sale.netRate, 0) / realized.length : 0;
-  return <>
-    <section className="overview">
-      <div className="overview-main"><div>累计已实现净收益</div><strong className={tone(net)}>{money(net, true)}</strong></div>
-      <dl className="overview-metrics">
-        <Metric label="累计买入金额">{money(sum(ledger.orders.filter(order => order.kind === 'buy').map(order => amountOf(order.fills))))}</Metric>
-        <Metric label="累计卖出金额">{money(sum(realized.map(sale => sale.sellAmount)))}</Metric>
-        <Metric label="平均净收益率">{realized.length ? rateLabel(averageRate) : '—'}</Metric>
-      </dl>
-    </section>
-    <section className="panel"><h2>卖出表现</h2><dl className="detail-metrics">
-      <Metric label="盈利卖出">{count(realized.filter(sale => sale.net > 0).length)} 次</Metric>
-      <Metric label="亏损卖出">{count(realized.filter(sale => sale.net < 0).length)} 次</Metric>
-      <Metric label="持平卖出">{count(realized.filter(sale => sale.net === 0).length)} 次</Metric>
-    </dl></section>
-    <section className="panel"><h2>各股票已实现收益</h2>
-      {ledger.stocks.length ? <dl className="lines">{ledger.stocks.map(stock => {
-        const total = sum(ledger.orders.filter(order => order.stockId === stock.id && order.kind === 'sell').map(order => sales.get(order.id)!.net));
-        return <div key={stock.id}><dt>{stock.name} <small>{stock.code}</small></dt><dd className={tone(total)}>{money(total, true)}</dd></div>;
-      })}</dl> : <p className="muted">暂无股票。</p>}
-    </section>
-  </>;
-}
-
-function FeeEditor({ profile, save, busy }: { profile: Profile; save: (profile: Profile) => void; busy: boolean }) {
-  const [fields, setFields] = useState(profile);
-  const [minimum, setMinimum] = useState(priceInput(profile.minimum));
-  const [error, setError] = useState('');
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    try {
-      save(validateProfile({ ...fields, minimum: cents(minimum, true) }));
-      setError('');
-    } catch (problem) {
-      setError(problem instanceof Error ? problem.message : '配置无效');
-    }
-  }
-  return <form className="panel" onSubmit={submit}>
-    <h2>交易费用</h2>
-    <p className="muted">按成交订单计费。印花税仅在卖出时计算。已登记交易保留当时的费用。</p>
-    <fieldset disabled={busy} className="fields">
-      {feeFields.map(field => <label key={field}>{feeLabels[field]}费率（%）
-        <input inputMode="decimal" disabled={field === 'regulatory' && fields.includesRegulatory} value={fields[field]} onChange={event => setFields({ ...fields, [field]: event.target.value })} />
-      </label>)}
-      <label>最低佣金（元）<input inputMode="decimal" value={minimum} onChange={event => setMinimum(event.target.value)} /></label>
-      <label className="checkbox"><input type="checkbox" checked={fields.includesRegulatory} onChange={event => setFields({ ...fields, includesRegulatory: event.target.checked })} />佣金已包含经手费及证管费</label>
-    </fieldset>
-    {error && <p className="form-message" role="alert">{error}</p>}
-    <div className="actions"><button className="primary" disabled={busy}>保存费用配置</button></div>
-  </form>;
-}
-
 export type SyncConfig = { folder: string; credential: string; secret: string };
-export function Settings({ local, busy, conflict, config, setConfig, feedback, saveProfile, sync, download, restore, clear }: {
+export function Settings({ local, busy, conflict, config, setConfig, feedback, sync, download, restore, clear }: {
   local: LocalState; busy: boolean; conflict: boolean; config: SyncConfig; setConfig: (config: SyncConfig) => void; feedback?: { text: string; error?: boolean };
-  saveProfile: (profile: Profile) => void; sync: (direction: SyncDirection) => void; download: () => void;
+  sync: (direction: SyncDirection) => void; download: () => void;
   restore: (file: File) => void; clear: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -256,7 +31,6 @@ export function Settings({ local, busy, conflict, config, setConfig, feedback, s
     <button type="button" disabled={busy} onClick={() => sync('upload')}>保留本机</button>
   </>;
   return <>
-    <FeeEditor key={JSON.stringify(local.ledger.profile)} profile={local.ledger.profile} save={saveProfile} busy={busy} />
     <section className="panel">
       <div className="section-title"><h2><Cloud size={19} /> 数据同步与备份</h2><span className="muted">{point?.revision === local.ledger.revision ? '已与云端同步' : point ? '本地有更新待同步' : '未同步'}</span></div>
       {point && <p className="muted">上次同步 {dateLabel(point.time)}</p>}
@@ -302,7 +76,7 @@ export function Settings({ local, busy, conflict, config, setConfig, feedback, s
     </dialog>
     <section className="panel">
       <h2>本机备份</h2>
-      <p className="muted">清除浏览器数据可能导致记录丢失。导出的 JSON 包含完整交易记录，请妥善保管。</p>
+      <p className="muted">清除浏览器数据可能导致记录丢失。导出的 JSON 包含股票和价格记录，请妥善保管。</p>
       <p className="muted">上次导出 {local.backupAt ? dateLabel(local.backupAt) : '暂无'}</p>
       <div className="actions spread">
         <button className="danger" disabled={busy} onClick={clear}>清空本机数据</button>

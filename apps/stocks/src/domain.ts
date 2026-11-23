@@ -14,6 +14,11 @@ export type Profile = {
   includesRegulatory: boolean;
 };
 export type Fill = { price: number; quantity: number };
+export type PriceRecord = { price: number; time: string; quantity?: number };
+export type TradePrice = PriceRecord & { kind: OrderKind };
+export type RecentPrices = Record<OrderKind, PriceRecord[]>;
+export type ClosedSummary = { realized: number; time: string; skipped: boolean };
+export type CycleBoundary = { count: number; endedAt: string };
 export type Stock = {
   id: string;
   code: string;
@@ -21,8 +26,11 @@ export type Stock = {
   market: '沪市' | '深市';
   price: number;
   priceUpdatedAt: string;
+  recent?: RecentPrices;
+  history?: TradePrice[];
+  closed?: ClosedSummary[];
+  cycles?: CycleBoundary[];
 };
-export type QuoteProvider = { getQuote(stock: Stock): Promise<{ price: number; updatedAt: string }> };
 type Order = {
   id: string;
   stockId: string;
@@ -96,6 +104,13 @@ export function shares(value: string): number {
   return quantity;
 }
 
+export const shareStep = 100;
+
+export function sharesForAmount(amount: number, price: number): number {
+  const lots = decimal(amount).div(price).div(shareStep).toDecimalPlaces(0).toNumber();
+  return Math.max(1, lots) * shareStep;
+}
+
 export function amountOf(fills: Fill[]): number {
   return sum(fills.map(fill => safeInteger(fill.price * fill.quantity)));
 }
@@ -141,6 +156,11 @@ export function percent(value: number, basis: number): number {
 
 export function average(amount: number, quantity: number): string {
   return quantity ? decimal(amount).div(quantity).div(100).toFixed(4) : '—';
+}
+
+export function averageChange(beforeAmount: number, beforeShares: number, afterAmount: number, afterShares: number): number {
+  return decimal(afterAmount).times(beforeShares).div(decimal(beforeAmount).times(afterShares))
+    .minus(1).times(100).toDecimalPlaces(8).toNumber();
 }
 
 export function compareLots(a: Lot, b: Lot): number {
@@ -302,6 +322,171 @@ function iso(value: string) {
   if (typeof value !== 'string' || !Number.isFinite(instant.getTime()) || instant.toISOString() !== value) throw Error('备份含无效时间');
 }
 
+export function compareSellPrice(buy: PriceRecord, price: number, sellQuantity?: number) {
+  const difference = price - buy.price;
+  const quantity = sellQuantity === undefined ? undefined : Math.min(sellQuantity, buy.quantity ?? sellQuantity);
+  const gross = quantity === undefined ? undefined : difference * quantity;
+  return { quantity, gross: Number.isSafeInteger(gross) ? gross : undefined, rate: percent(difference, buy.price) };
+}
+
+export function remainingPosition(trades: TradePrice[]) {
+  const lots: Fill[] = [];
+  let skipped = false;
+  let realized = 0;
+  const chronological = [...trades].reverse().sort((a, b) => a.time.localeCompare(b.time));
+  for (const trade of chronological) {
+    if (trade.quantity === undefined) {
+      skipped = true;
+      continue;
+    }
+    if (trade.kind === 'buy') {
+      lots.push({ price: trade.price, quantity: trade.quantity });
+      continue;
+    }
+
+    // Sort highest first so the cheapest lot can be removed from the end.
+    let unsatisfied = trade.quantity;
+    lots.sort((a, b) => b.price - a.price);
+    while (unsatisfied && lots.length) {
+      const lot = lots[lots.length - 1];
+      const matched = Math.min(unsatisfied, lot.quantity);
+      realized = sum([realized, safeInteger((trade.price - lot.price) * matched)]);
+      unsatisfied -= matched;
+      lot.quantity -= matched;
+      if (!lot.quantity) lots.pop();
+    }
+    if (unsatisfied) skipped = true;
+  }
+  return { quantity: sum(lots.map(lot => lot.quantity)), cost: amountOf(lots), realized, skipped };
+}
+
+function legacyPrices(stock: Stock, orders: Ledger['orders']): TradePrice[] {
+  return orders.filter(order => order.stockId === stock.id).reverse().map(order => {
+    const quantity = sum(order.fills.map(fill => fill.quantity));
+    const price = decimal(amountOf(order.fills)).div(quantity).toDecimalPlaces(0).toNumber();
+    return { price, quantity, time: order.time, kind: order.kind };
+  }).sort((a, b) => b.time.localeCompare(a.time));
+}
+
+export function recentPrices(stock: Stock, orders: Ledger['orders']): RecentPrices {
+  if (stock.recent) return stock.recent;
+  const legacy = legacyPrices(stock, orders);
+  const take = (kind: OrderKind) => legacy.filter(entry => entry.kind === kind).slice(0, 3)
+    .map(({ price, quantity, time }) => ({ price, quantity, time }));
+  return { buy: take('buy'), sell: take('sell') };
+}
+
+export function tradePrices(stock: Stock, orders: Ledger['orders']): TradePrice[] {
+  if (stock.history) return stock.history;
+  const legacy = legacyPrices(stock, orders);
+  if (!stock.recent) return legacy;
+
+  // Older versions kept up to three prices per side beside the original order
+  // ledger. Match each copied record once before combining the two sources.
+  const key = (entry: TradePrice) => JSON.stringify([entry.kind, entry.time, entry.price, entry.quantity]);
+  const counts = new Map<string, number>();
+  for (const trade of legacy) {
+    const id = key(trade);
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  const recent = (['buy', 'sell'] as const).flatMap(kind => stock.recent![kind].map(record => ({ ...record, kind })));
+  const additional = recent.filter(trade => {
+    const id = key(trade);
+    const count = counts.get(id) ?? 0;
+    if (count) counts.set(id, count - 1);
+    return !count;
+  });
+  return [...additional, ...legacy].sort((a, b) => b.time.localeCompare(a.time));
+}
+
+export function recordPrice(stock: Stock, orders: Ledger['orders'], kind: OrderKind, record: PriceRecord): Stock {
+  const recent = recentPrices(stock, orders);
+  return {
+    ...stock,
+    recent: { ...recent, [kind]: [record, ...recent[kind].slice(0, 2)] },
+    history: [{ ...record, kind }, ...tradePrices(stock, orders)],
+  };
+}
+
+export function sameTrade(a: TradePrice, b: TradePrice): boolean {
+  return a.kind === b.kind && a.time === b.time && a.price === b.price && a.quantity === b.quantity;
+}
+
+export function deleteTrade(stock: Stock, orders: Ledger['orders'], index: number, expected: TradePrice): Stock {
+  const history = tradePrices(stock, orders);
+  if (!history[index] || !sameTrade(history[index], expected)) throw Error('这笔交易已变化，请重新打开后再删除');
+  const remaining = history.filter((_, item) => item !== index);
+  const recent = recentPrices(stock, orders);
+  const preserved = recent[expected.kind].filter(entry =>
+    !history.some(trade => sameTrade(trade, { ...entry, kind: expected.kind })));
+  const nextRecent = [...remaining.filter(trade => trade.kind === expected.kind), ...preserved]
+    .sort((a, b) => b.time.localeCompare(a.time)).slice(0, 3);
+  let offset = history.length - 1 - index;
+  const cycles = stock.cycles?.flatMap(cycle => {
+    const contains = offset >= 0 && offset < cycle.count;
+    offset -= cycle.count;
+    if (!contains) return [cycle];
+    return cycle.count === 1 ? [] : [{ ...cycle, count: cycle.count - 1 }];
+  });
+  return {
+    ...stock,
+    history: remaining,
+    recent: { ...recent, [expected.kind]: nextRecent },
+    ...(cycles ? { cycles } : {}),
+  };
+}
+
+export function activeCycle(stock: Stock, history: TradePrice[]): TradePrice[] {
+  const endedCount = sum((stock.cycles ?? []).map(cycle => cycle.count));
+  return history.slice(0, history.length - endedCount);
+}
+
+export function finishCycle(stock: Stock, orders: Ledger['orders'], endedAt: string): Stock {
+  const history = tradePrices(stock, orders);
+  const count = activeCycle(stock, history).length;
+  if (!count) return stock;
+  return { ...stock, history, cycles: [...(stock.cycles ?? []), { count, endedAt }] };
+}
+
+export function cycleResult(history: TradePrice[]) {
+  const pending: { price: number; quantity: number; kind: OrderKind }[] = [];
+  let start = 0;
+  let matched = 0;
+  let realized = 0;
+  let skipped = false;
+  for (const trade of [...history].reverse().sort((a, b) => a.time.localeCompare(b.time))) {
+    if (trade.quantity === undefined) {
+      skipped = true;
+      continue;
+    }
+    let quantity = trade.quantity;
+    while (quantity && start < pending.length && pending[start].kind !== trade.kind) {
+      const lot = pending[start];
+      const count = Math.min(quantity, lot.quantity);
+      const delta = trade.kind === 'sell' ? trade.price - lot.price : lot.price - trade.price;
+      realized = sum([realized, safeInteger(delta * count)]);
+      matched = sum([matched, count]);
+      quantity -= count;
+      lot.quantity -= count;
+      if (!lot.quantity) start++;
+    }
+    if (quantity) pending.push({ price: trade.price, kind: trade.kind, quantity });
+  }
+  const unmatchedKind = pending[start]?.kind;
+  const remaining = pending.slice(start);
+  return {
+    matched, realized, skipped, unmatchedKind,
+    unmatched: sum(remaining.map(lot => lot.quantity)),
+    remainingBuyCost: unmatchedKind === 'buy' ? amountOf(remaining) : 0,
+  };
+}
+
+function validatePriceRecord(record: PriceRecord) {
+  nonnegative(record.price, true);
+  if (record.quantity !== undefined) nonnegative(record.quantity, true);
+  iso(record.time);
+}
+
 export function validateLedger(raw: unknown): Ledger {
   const data = raw as Ledger;
   if (data?.version !== 1 || typeof data.revision !== 'string' || !data.revision ||
@@ -315,7 +500,37 @@ export function validateLedger(raw: unknown): Ledger {
         typeof stock.name !== 'string' || !stock.name.trim() || typeof stock.code !== 'string' || !/^\d{6}$/.test(stock.code) ||
         !['沪市', '深市'].includes(stock.market)) throw Error('股票代码无效或重复');
     iso(stock.priceUpdatedAt);
-    nonnegative(stock.price, true);
+    nonnegative(stock.price);
+    if (stock.recent !== undefined) {
+      for (const kind of ['buy', 'sell'] as const) {
+        const records = stock.recent?.[kind];
+        if (!Array.isArray(records) || records.length > 3) throw Error('备份含无效的近期价格');
+        for (const record of records) validatePriceRecord(record);
+      }
+    }
+    if (stock.history !== undefined) {
+      if (!Array.isArray(stock.history)) throw Error('备份含无效交易记录');
+      for (const record of stock.history) {
+        if (record.kind !== 'buy' && record.kind !== 'sell') throw Error('备份含无效交易方向');
+        validatePriceRecord(record);
+      }
+    }
+    if (stock.cycles !== undefined) {
+      if (!Array.isArray(stock.cycles) || !Array.isArray(stock.history)) throw Error('备份含无效周期');
+      for (const cycle of stock.cycles) {
+        nonnegative(cycle.count, true);
+        iso(cycle.endedAt);
+      }
+      if (sum(stock.cycles.map(cycle => cycle.count)) > stock.history.length) throw Error('周期超出交易记录范围');
+    }
+    if (stock.closed !== undefined) {
+      if (!Array.isArray(stock.closed)) throw Error('备份含无效清仓汇总');
+      for (const summary of stock.closed) {
+        safeInteger(summary.realized);
+        iso(summary.time);
+        if (typeof summary.skipped !== 'boolean') throw Error('备份含无效清仓汇总');
+      }
+    }
     stocks.add(stock.id);
     symbols.add(symbol);
   }

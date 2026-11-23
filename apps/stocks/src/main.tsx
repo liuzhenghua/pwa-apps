@@ -1,26 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ArrowLeft, ChartNoAxesCombined, ChartPie, History, RefreshCw, Settings2, Wallet } from 'lucide-react';
+import { ChartNoAxesCombined, CircleCheck, History, RefreshCw, Settings2, TrendingUp } from 'lucide-react';
 import { readStored, saveStored } from '@pwa-apps/shared';
 import { bundledToken, downloadLedger, SyncConflict, syncGithub, type SyncDirection } from './backup.ts';
-import { emptyLedger, project, registerSale, validateLedger, type Ledger, type Stock } from './domain.ts';
-import { OrderEditor } from './orders.tsx';
-import { Portfolio, Settings, Statistics, StockDetail, StockEditor, Transactions, type SyncConfig } from './pages.tsx';
+import { deleteTrade, emptyLedger, finishCycle, recordPrice, validateLedger, type Ledger, type OrderKind, type Stock, type TradePrice } from './domain.ts';
+import { Settings, type SyncConfig } from './pages.tsx';
+import { useQuotes } from './quotes.ts';
+import { Cycles, Transactions } from './transactions.tsx';
+import { Watchlist } from './watchlist.tsx';
 import { readLocal, updateLocal, type LocalState } from './store.ts';
 import './style.css';
 
-const navigation = [
-  { id: 'portfolio', label: '持仓', icon: Wallet },
-  { id: 'trades', label: '交易', icon: History },
-  { id: 'stats', label: '统计', icon: ChartPie },
-  { id: 'settings', label: '设置', icon: Settings2 },
-] as const;
-type Tab = typeof navigation[number]['id'];
-type Screen = { name: Tab | 'add' } | { name: 'detail' | 'edit' | 'buy' | 'sell'; id: string };
+const tabLabels = { holdings: '持仓', trades: '交易', closed: '收益', settings: '设置' } as const;
+type Tab = keyof typeof tabLabels;
+const tabIcons = { holdings: TrendingUp, trades: History, closed: CircleCheck, settings: Settings2 };
 
 function App() {
   const [local, setLocal] = useState<LocalState>();
-  const [screen, setScreen] = useState<Screen>({ name: 'portfolio' });
+  const [tab, setTab] = useState<Tab>('holdings');
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ text: string; error?: boolean }>();
   const [conflict, setConflict] = useState(false);
@@ -55,64 +52,93 @@ function App() {
   }, []);
 
   const ledger = local?.ledger;
-  const projection = useMemo(() => project(ledger?.orders ?? []), [ledger]);
-  const stock = 'id' in screen ? ledger?.stocks.find(item => item.id === screen.id) : undefined;
-  const tab = navigation.find(item => item.id === screen.name);
-  const title = screen.name === 'add' ? '添加股票' : screen.name === 'edit' ? '编辑股票' :
-    screen.name === 'buy' ? '登记买入' : screen.name === 'sell' ? '卖出测算' :
-      screen.name === 'detail' ? stock?.name : tab?.label;
+  const market = useQuotes(ledger?.stocks ?? [], tab !== 'settings');
 
-  function go(next: Screen) {
-    setScreen(next);
+  function navigate(next: Tab) {
+    setTab(next);
     setFeedback(undefined);
     window.scrollTo(0, 0);
   }
 
   async function run(operation: () => Promise<void>) {
-    if (job.current) return;
+    if (job.current) return false;
     job.current = true;
     setBusy(true);
     setFeedback(undefined);
     try {
       await operation();
+      return true;
     } catch (error) {
       setConflict(error instanceof SyncConflict);
       setFeedback({ text: error instanceof Error ? error.message : String(error), error: true });
       const latest = await readLocal().catch(() => undefined);
       if (latest) setLocal(latest);
+      return false;
     } finally {
       job.current = false;
       setBusy(false);
     }
   }
 
-  function change(update: (current: Ledger) => Ledger, message: string, nextScreen?: Screen, extra?: (current: LocalState) => LocalState) {
-    if (!local) return;
-    void run(async () => {
+  async function change(update: (current: Ledger) => Ledger, message: string, extra?: (current: LocalState) => LocalState) {
+    if (!local) return false;
+    return run(async () => {
       const saved = await updateLocal(local.ledger.revision, current => ({
         ...(extra ? extra(current) : current),
         ledger: { ...update(current.ledger), revision: crypto.randomUUID() },
       }));
       setLocal(saved);
       channel.current?.postMessage('update');
-      if (nextScreen) go(nextScreen);
       setFeedback({ text: message });
     });
   }
 
-  function saveStock(value: Stock) {
-    change(current => ({ ...current, stocks: stock
-      ? current.stocks.map(item => item.id === value.id ? value : item)
-      : [...current.stocks, value] }), '股票已保存', { name: 'detail', id: value.id });
+  function saveStock(stock: Stock) {
+    return change(current => ({ ...current, stocks: [...current.stocks, stock] }), '股票已添加');
+  }
+
+  function savePrice(stock: Stock, kind: OrderKind, price: number, quantity: number) {
+    const entry = { price, quantity, time: new Date().toISOString() };
+    return change(current => {
+      if (!current.stocks.some(item => item.id === stock.id)) throw Error('这只股票已移除');
+      return {
+        ...current,
+        stocks: current.stocks.map(item => item.id === stock.id ? recordPrice(item, current.orders, kind, entry) : item),
+      };
+    }, kind === 'buy' ? '买价已记录' : '卖价已记录');
+  }
+
+  function removeTrade(stockId: string, index: number, entry: TradePrice) {
+    if (!window.confirm('删除这笔' + (entry.kind === 'buy' ? '买入' : '卖出') + '记录？持仓和周期收益会重新计算。')) {
+      return Promise.resolve(false);
+    }
+    return change(current => {
+      if (!current.stocks.some(stock => stock.id === stockId)) throw Error('这只股票已移除');
+      return { ...current, stocks: current.stocks.map(stock =>
+        stock.id === stockId ? deleteTrade(stock, current.orders, index, entry) : stock) };
+    }, '交易记录已删除');
+  }
+
+  function endCycle(target: Stock) {
+    if (!window.confirm('结束「' + target.name + '」的本次做 T 周期？交易流水会保留，下一笔开始新周期。')) {
+      return Promise.resolve(false);
+    }
+    const endedAt = new Date().toISOString();
+    return change(current => ({
+      ...current,
+      stocks: current.stocks.map(stock => stock.id === target.id ? finishCycle(stock, current.orders, endedAt) : stock),
+    }), '本次做 T 周期已结束');
   }
 
   function removeStock(target: Stock) {
-    const hasOrders = ledger?.orders.some(order => order.stockId === target.id);
-    if (!window.confirm('删除「' + target.name + '」？' + (hasOrders ? '其买入、卖出和收益记录也会一并删除。' : ''))) return;
-    change(current => ({ ...current,
-      stocks: current.stocks.filter(item => item.id !== target.id),
+    if (!window.confirm('删除「' + target.name + '」？持仓卡片、最近买卖价、交易记录和周期汇总都会删除。')) {
+      return Promise.resolve(false);
+    }
+    return change(current => ({
+      ...current,
+      stocks: current.stocks.filter(stock => stock.id !== target.id),
       orders: current.orders.filter(order => order.stockId !== target.id),
-    }), '股票已删除', { name: 'portfolio' });
+    }), '股票已删除');
   }
 
   function updateConfig(next: SyncConfig) {
@@ -149,44 +175,22 @@ function App() {
     <header className="topbar">
       <div className="top-inner">
         <div className="brand"><span className="brand-mark"><ChartNoAxesCombined size={22} /></span><strong>股票账簿</strong></div>
-        <span className="top-caption">持仓与卖出收益</span>
       </div>
     </header>
     <main className="shell">
-      <div className="page-heading">
-        {!tab && <button type="button" className="back-button" aria-label="返回" disabled={busy} onClick={() =>
-          go(stock && screen.name !== 'detail' ? { name: 'detail', id: stock.id } : { name: 'portfolio' })
-        }><ArrowLeft size={20} /></button>}
-        <div>
-          <h1>{title || '股票详情'}</h1>
-          {stock && screen.name !== 'detail' && <span className="muted">{stock.name} · {stock.market} {stock.code}</span>}
-        </div>
+      {(tab !== 'holdings' || !ledger) && <div className="page-heading">
+        <h1>{tabLabels[tab]}</h1>
         {busy && <span className="busy" role="status"><RefreshCw size={16} /> 处理中</span>}
-      </div>
+      </div>}
       {feedback && <div className={'feedback ' + (feedback.error ? 'error' : '')} role={feedback.error ? 'alert' : 'status'}>{feedback.text}</div>}
       {!local || !ledger ? <div className="panel muted">{feedback?.error
         ? <button onClick={() => void run(async () => setLocal(await readLocal()))}>重新读取数据</button>
         : '正在读取本机数据…'}</div> : <>
-        {screen.name === 'portfolio' && <Portfolio ledger={ledger} {...projection}
-          add={() => go({ name: 'add' })} detail={id => go({ name: 'detail', id })} calculate={id => go({ name: 'sell', id })} />}
-        {screen.name === 'detail' && stock && <StockDetail ledger={ledger} stock={stock} {...projection}
-          edit={() => go({ name: 'edit', id: stock.id })} buy={() => go({ name: 'buy', id: stock.id })}
-          sell={() => go({ name: 'sell', id: stock.id })} remove={() => removeStock(stock)} />}
-        {(screen.name === 'add' || screen.name === 'edit' && stock) && <StockEditor key={stock?.id ?? 'new'} stock={stock} ledger={ledger} save={saveStock} busy={busy} />}
-        {(screen.name === 'buy' || screen.name === 'sell') && stock && <OrderEditor key={screen.name + stock.id}
-          kind={screen.name} stock={stock} lots={projection.lots} profile={ledger.profile} busy={busy}
-          save={draft => {
-            const order = { ...draft, id: crypto.randomUUID(), stockId: stock.id, profile: ledger.profile };
-            change(current => ({ ...current, orders: [...current.orders, screen.name === 'sell'
-              ? registerSale(current, order) : { ...order, kind: 'buy' }] }), screen.name === 'sell' ? '实际卖出已登记' : '买入已登记',
-              { name: 'detail', id: stock.id });
-          }} />}
-        {'id' in screen && !stock && <div className="panel muted">这只股票已从本机账簿移除。</div>}
-        {screen.name === 'trades' && <Transactions ledger={ledger} {...projection} />}
-        {screen.name === 'stats' && <Statistics ledger={ledger} sales={projection.sales} />}
-        {screen.name === 'settings' && <Settings local={local} busy={busy} conflict={conflict}
+        {tab === 'holdings' && <Watchlist ledger={ledger} busy={busy} add={saveStock} record={savePrice} endCycle={endCycle} removeTrade={removeTrade} remove={removeStock} market={market} />}
+        {tab === 'trades' && <Transactions ledger={ledger} quotes={market.quotes} busy={busy} removeTrade={removeTrade} />}
+        {tab === 'closed' && <Cycles ledger={ledger} quotes={market.quotes} />}
+        {tab === 'settings' && <Settings local={local} busy={busy} conflict={conflict}
           config={config} setConfig={updateConfig} feedback={feedback}
-          saveProfile={profile => change(current => ({ ...current, profile }), '费用配置已保存')}
           sync={synchronize} download={() => void run(async () => {
             const saved = await updateLocal(ledger.revision, current => ({ ...current, backupAt: Date.now() }));
             downloadLedger(saved.ledger);
@@ -195,7 +199,7 @@ function App() {
           })}
           restore={file => void run(async () => {
             const imported = validateLedger(JSON.parse(await file.text()));
-            if (!window.confirm('用此备份覆盖本机股票、交易和费用配置？')) return;
+            if (!window.confirm('用此备份覆盖本机股票和记录？')) return;
             const saved = await updateLocal(ledger.revision, current => ({
               ...current, ledger: { ...imported, revision: crypto.randomUUID() },
             }));
@@ -204,20 +208,21 @@ function App() {
             setFeedback({ text: '本机备份已恢复' });
           })}
           clear={() => {
-            if (window.confirm('清空所有本机股票、交易和费用设置？') &&
+            if (window.confirm('清空所有本机股票和记录？') &&
                 window.confirm('再次确认清空本机数据？云端备份可单独管理。')) {
-              change(emptyLedger, '本机数据已清空', undefined, () => ({ ledger: emptyLedger() }));
+              void change(emptyLedger, '本机数据已清空', () => ({ ledger: emptyLedger() }));
             }
           }} />}
       </>}
     </main>
-    <nav className="nav" aria-label="主导航">
-      <div>{navigation.map(item => {
-        const Icon = item.icon;
-        const selected = item.id === (tab?.id ?? 'portfolio');
-        return <button type="button" key={item.id} className={selected ? 'active' : ''} aria-current={selected ? 'page' : undefined} disabled={busy}
-          onClick={() => go({ name: item.id })}><Icon size={21} /><span>{item.label}</span></button>;
-      })}</div>
+    <nav className="bottom-nav" aria-label="主菜单">
+      <div>
+        {(Object.keys(tabLabels) as Tab[]).map(item => {
+          const Icon = tabIcons[item];
+          return <button key={item} type="button" disabled={busy} aria-current={tab === item ? 'page' : undefined}
+            onClick={() => navigate(item)}><Icon size={19} />{tabLabels[item]}</button>;
+        })}
+      </div>
     </nav>
   </>;
 }

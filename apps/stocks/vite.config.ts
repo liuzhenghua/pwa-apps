@@ -24,7 +24,7 @@ export default defineConfig(({ mode, command }) => {
           id: base,
           name: '股票账簿',
           short_name: '股票账簿',
-          description: '管理股票持仓与买入批次，计算卖出收益',
+          description: '自动查看沪深行情，记录最近三笔买价和卖价',
           lang: 'zh-CN',
           start_url: base,
           scope: base,

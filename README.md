@@ -6,7 +6,7 @@
 | --- | --- |
 | [笔记](apps/notes/README.md) | 本地笔记、搜索、加密 GitHub 同步 |
 | [照片布局](apps/photo-layout/README.md) | 6 寸照片排版与导出 |
-| [股票账簿](apps/stocks/README.md) | 买入批次、卖出测算、已实现收益与加密同步 |
+| [股票账簿](apps/stocks/README.md) | 沪深行情、最近三笔买卖价与加密同步 |
 | [资产簿](apps/assets/README.md) | 月度余额、净资产趋势、盘点与加密备份 |
 
 默认入口：<https://liuzhenghua.github.io/pwa-apps/>。PWA 的安装和离线行为见 [PWA 说明](docs/pwa.md)。
