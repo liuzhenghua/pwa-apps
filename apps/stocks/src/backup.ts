@@ -7,6 +7,7 @@ const folderPattern = /^[\w-]{1,60}$/;
 
 export const repository = 'liuzhenghua/pwa-apps-data';
 export const bundledToken = import.meta.env?.VITE_GITHUB_TOKEN_BOX?.trim();
+export const missingTokenBoxMessage = '缺少 GitHub 同步配置。请配置 VITE_GITHUB_TOKEN_BOX 后重新启动开发服务，或重新部署应用。';
 const api = 'https://api.github.com/repos/' + repository;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -48,7 +49,7 @@ export type SyncDirection = 'auto' | 'upload' | 'download';
 
 export class SyncConflict extends Error {}
 
-async function githubArchive(folderInput: string, credential: string, secret: string) {
+export async function githubArchive(folderInput: string, credential: string, secret: string) {
   const folder = folderInput.trim();
   if (!folderPattern.test(folder)) throw Error('云端名字需使用 1–60 位字母、数字、下划线或连字符');
   if (!credential.trim() || !secret) throw Error('请填写云端访问凭据和数据加密口令');
@@ -117,7 +118,7 @@ async function githubArchive(folderInput: string, credential: string, secret: st
       if (file === 'open.json') indexSha = sha ?? '';
       tree.push({ path: directory + file, mode: '100644', type: 'blob', sha });
     }
-    const message = 'Sync encrypted stock ledger';
+    const message = changes.has('alerts.json') ? 'Sync encrypted stock alerts' : 'Sync encrypted stock ledger';
     const nextTree = await gitWrite('trees', 'POST', { base_tree: base.tree.sha, tree });
     const commit = await gitWrite('commits', 'POST', { message, tree: nextTree.sha, parents: [parent] });
     await gitWrite('refs/' + branch, 'PATCH', { sha: commit.sha, force: false });

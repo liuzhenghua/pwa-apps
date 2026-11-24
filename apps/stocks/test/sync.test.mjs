@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { webcrypto } from 'node:crypto';
 import 'fake-indexeddb/auto';
 import { calendarYear, splitLedger } from '../src/archive.ts';
+import { matchesAlert, openAlerts } from '../src/alerts.ts';
 import { emptyLedger, finishCycle, recordPrice, tradePrices } from '../src/domain.ts';
 import { loadArchiveYears, SyncConflict, syncGithub } from '../src/backup.ts';
 import { readLocal, updateLocal } from '../src/store.ts';
@@ -224,4 +225,26 @@ test('encrypted yearly sync uses stable paths and publishes complete snapshots a
   assert.equal(await sync(restored.local).then(result => result.message), '已加密上传到 GitHub');
   assert.equal(files().has('ledger.json'), false);
   assert.equal(files().has('open.json'), true);
+
+  const localIndex = files().get('open.json');
+  const reminders = await openAlerts({ folder: 'test-ledger', credential: 'mock-token', secret });
+  assert.equal((await reminders.read()).data, undefined);
+  const first = { id: 'a', symbol: 'sh600000', name: stock.name, kind: 'buy', price: 2300 };
+  const second = { ...first, id: 'b', kind: 'sell', price: 2400 };
+  await reminders.update(() => ({ version: 1, publicKey: 'test-public-key', alerts: [first] }));
+  let attempts = 0;
+  await reminders.update(state => {
+    // Simulate an unrelated ledger commit after reading the alerts snapshot.
+    if (++attempts === 1) externalUpdate('open.json', localIndex);
+    return { ...state, alerts: [...state.alerts, second] };
+  });
+  assert.equal(attempts, 2);
+  assert.deepEqual((await reminders.read()).data.alerts, [first, second]);
+  assert.deepEqual(files().get('open.json'), localIndex);
+  assert.deepEqual(publications.at(-1), ['alerts.json']);
+  assert.equal(matchesAlert(first, 2300), true);
+  assert.equal(matchesAlert(first, 2301), false);
+  assert.equal(matchesAlert(second, 2400), true);
+  assert.equal(matchesAlert(second, 2399), false);
+  assert.equal(matchesAlert({ ...second, triggeredAt: stock.priceUpdatedAt }, 2400), false);
 });

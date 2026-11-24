@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ChevronRight, Plus, RefreshCw } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from 'react';
+import { Bell, ChevronRight, Info, Plus, RefreshCw } from 'lucide-react';
+import { AlertSheet } from './alert-sheet.tsx';
+import type { SyncConfig } from './pages.tsx';
 import { activeCycle, average, cents, compareSellPrice, cycleResult, buyObservationMatches, defaultObservationRules, percent, reachesBuyObservation, recentPrices, sellObservation, sum, shares, sharesForAmount, shareStep, sameTrade, tradePrices, type Ledger, type ObservationRules, type OrderKind, type PriceRecord, type Stock, type TradePrice } from './domain.ts';
 import { money, tradeDateLabel } from './format.ts';
 import { symbolFor, useQuotes, type Quote } from './quotes.ts';
@@ -13,6 +15,7 @@ const quoteTime = new Intl.DateTimeFormat('zh-CN', {
 
 type Editor = { type: 'add' } | { type: 'record'; stock: Stock; kind: OrderKind }
   | { type: 'stock'; stock: Stock }
+  | { type: 'alerts'; stock: Stock }
   | { type: 'detail'; stock: Stock; kind: OrderKind; index: number; entry: PriceRecord; tradeIndex?: number };
 type Props = {
   ledger: Ledger;
@@ -23,7 +26,14 @@ type Props = {
   removeTrade: (stockId: string, index: number, entry: TradePrice) => Promise<boolean>;
   remove: (stock: Stock) => Promise<boolean>;
   market: ReturnType<typeof useQuotes>;
+  syncConfig: SyncConfig;
 };
+
+function isBackdropPress(event: MouseEvent<HTMLDialogElement>): boolean {
+  if (event.target !== event.currentTarget) return false;
+  const { left, right, top, bottom } = event.currentTarget.getBoundingClientRect();
+  return event.clientX < left || event.clientX >= right || event.clientY < top || event.clientY >= bottom;
+}
 
 function PriceSide({ kind, records, open }: {
   kind: OrderKind;
@@ -240,18 +250,20 @@ function SellPreview({ buys, value, quantity }: { buys: PriceRecord[]; value: st
   </section>;
 }
 
-export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, remove, market }: Props) {
+export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, remove, market, syncConfig }: Props) {
   const { quotes, missing, loading, refresh } = market;
   const [editor, setEditor] = useState<Editor>();
   const [value, setValue] = useState<string>();
   const [quantity, setQuantity] = useState('');
   const [error, setError] = useState('');
   const dialog = useRef<HTMLDialogElement>(null);
+  const pressedBackdrop = useRef(false);
   useEffect(() => {
     if (editor && !dialog.current?.open) dialog.current?.showModal();
   }, [editor]);
 
   function open(next: Editor) {
+    pressedBackdrop.current = false;
     setError('');
     const price = next.type === 'record' ? quotes.get(symbolFor(next.stock))?.price : undefined;
     setValue(price === undefined ? undefined : (price / 100).toFixed(2));
@@ -268,7 +280,7 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!editor || editor.type === 'detail' || editor.type === 'stock' || busy) return;
+    if (!editor || editor.type === 'detail' || editor.type === 'stock' || editor.type === 'alerts' || busy) return;
     setError('');
     try {
       let saved: boolean;
@@ -388,8 +400,12 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
         return <article className="panel watch-card" key={stock.id} id={'holding-' + stock.id} tabIndex={-1}>
           <div className="watch-heading">
             <div><h2>{name}</h2><p className="muted">{stock.market} · {stock.code}</p></div>
-            <button type="button" className="stock-detail-button" aria-label={name + '详情'} disabled={busy}
-              onClick={() => open({ type: 'stock', stock })}>详情 <ChevronRight size={15} /></button>
+            <div className="watch-heading-actions">
+              <button type="button" className="icon-button stock-detail-button" aria-label={name + '价格提醒'} title="价格提醒" disabled={busy}
+                onClick={() => open({ type: 'alerts', stock })}><Bell size={18} aria-hidden="true" /></button>
+              <button type="button" className="icon-button stock-detail-button" aria-label={name + '详情'} title="股票详情" disabled={busy}
+                onClick={() => open({ type: 'stock', stock })}><Info size={18} aria-hidden="true" /></button>
+            </div>
           </div>
           <div className="watch-quote">
             <span className="muted">最新价</span>
@@ -437,9 +453,17 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
         </article>;
       })}
     </div>
-    <dialog ref={dialog} className={editor && !addMode ? 'sync-dialog entry-sheet' : 'sync-dialog'} aria-labelledby="watch-editor-title" data-side={stockDetail ? 'stock' : detail ? 'detail' : editor?.type === 'record' ? editor.kind : undefined}
-      onClose={() => setEditor(undefined)} onCancel={event => { if (busy) event.preventDefault(); }}>
-      {editor && <form onSubmit={event => void submit(event)}>
+    <dialog ref={dialog} className={editor && !addMode ? 'sync-dialog entry-sheet' : 'sync-dialog'} aria-labelledby="watch-editor-title" data-side={stockDetail ? 'stock' : detail ? 'detail' : editor?.type === 'record' ? editor.kind : editor?.type}
+      onClose={() => setEditor(undefined)} onCancel={event => { if (busy) event.preventDefault(); }}
+      onPointerDown={event => { pressedBackdrop.current = event.button === 0 && isBackdropPress(event); }}
+      onClick={event => {
+        const tappedBackdrop = pressedBackdrop.current && event.detail > 0 && isBackdropPress(event);
+        pressedBackdrop.current = false;
+        if (!addMode && !busy && tappedBackdrop) event.currentTarget.close();
+      }}>
+      {editor?.type === 'alerts' ? <AlertSheet config={syncConfig} symbol={symbolFor(editor.stock)}
+        name={editorQuote?.name ?? editor.stock.name} close={() => dialog.current?.close()} />
+        : editor && <form onSubmit={event => void submit(event)}>
         <div className="section-title editor-heading">
           <h2 id="watch-editor-title">{editor.type === 'add' ? '添加股票' : editor.type === 'stock' ? '股票详情' : detail ? sideLabels[detail.kind] + (detail.index + 1) + '详情' : '记录' + sideLabels[editor.kind] + '价'}</h2>
           <button type="button" disabled={busy} onClick={() => dialog.current?.close()}>关闭</button>

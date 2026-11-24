@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ChartNoAxesCombined, CircleCheck, History, RefreshCw, Settings2, TrendingUp } from 'lucide-react';
 import { readStored, saveStored } from '@pwa-apps/shared';
-import { bundledToken, downloadLedger, loadArchiveYears, SyncConflict, syncGithub, type SyncDirection } from './backup.ts';
+import { bundledToken, downloadLedger, loadArchiveYears, missingTokenBoxMessage, SyncConflict, syncGithub, type SyncDirection } from './backup.ts';
 import { deleteTrade, emptyLedger, finishCycle, recordPrice, validateLedger, type Ledger, type OrderKind, type Stock, type TradePrice } from './domain.ts';
 import { Settings, type SyncConfig } from './pages.tsx';
 import { useQuotes } from './quotes.ts';
@@ -30,10 +30,9 @@ function App() {
     }, 2800);
     return () => window.clearTimeout(timer);
   }, [feedback]);
-  const credentialKey = bundledToken ? 'stocks:cloud-passphrase' : 'stocks:token';
   const [config, setConfig] = useState<SyncConfig>(() => ({
     folder: readStored('stocks:sync-folder', ''),
-    credential: readStored(credentialKey, ''),
+    credential: readStored('stocks:cloud-passphrase', ''),
     secret: readStored('stocks:secret', ''),
   }));
   const job = useRef(false);
@@ -158,22 +157,20 @@ function App() {
     try {
       saveStored('stocks:sync-folder', next.folder.trim());
       saveStored('stocks:secret', next.secret);
-      if (bundledToken || !next.credential) saveStored(credentialKey, next.credential);
+      saveStored('stocks:cloud-passphrase', next.credential);
     } catch { /* Settings remain available for this session. */ }
   }
 
   function synchronize(direction: SyncDirection, startup = false) {
     if (!local) return;
     void run(async () => {
+      if (!bundledToken) throw Error(missingTokenBoxMessage);
       const result = await syncGithub(local, config.folder, config.credential, config.secret, direction, action =>
         window.confirm(action === 'upload' ? '用本机股票账簿覆盖云端备份？' : '用云端备份覆盖本机股票账簿？')
       );
       if (result.canceled) {
         setFeedback({ text: result.message });
         return;
-      }
-      if (!bundledToken) {
-        try { saveStored(credentialKey, config.credential.trim()); } catch { /* Sync is already complete. */ }
       }
       setLocal(result.local);
       channel.current?.postMessage('update');
@@ -187,7 +184,7 @@ function App() {
   useEffect(() => {
     if (!local || checkedStartupSync.current) return;
     checkedStartupSync.current = true;
-    if (navigator.onLine && config.folder.trim() && config.credential.trim() && config.secret) {
+    if (bundledToken && navigator.onLine && config.folder.trim() && config.credential.trim() && config.secret) {
       synchronize('auto', true);
     }
   });
@@ -195,6 +192,7 @@ function App() {
   function loadYears(years: string[]) {
     if (!local) return;
     void run(async () => {
+      if (!bundledToken) throw Error(missingTokenBoxMessage);
       const next = await loadArchiveYears(local, years, config.credential, config.secret);
       setLocal(next);
       channel.current?.postMessage('update');
@@ -217,7 +215,7 @@ function App() {
       {!local || !ledger ? <div className="panel muted">{feedback?.error
         ? <button onClick={() => void run(async () => setLocal(await readLocal()))}>重新读取数据</button>
         : '正在读取本机数据…'}</div> : <>
-        {tab === 'holdings' && <Watchlist ledger={ledger} busy={busy} add={saveStock} record={savePrice} endCycle={endCycle} removeTrade={removeTrade} remove={removeStock} market={market} />}
+        {tab === 'holdings' && <Watchlist ledger={ledger} busy={busy} add={saveStock} record={savePrice} endCycle={endCycle} removeTrade={removeTrade} remove={removeStock} market={market} syncConfig={config} />}
         {tab === 'trades' && <Transactions ledger={ledger} quotes={market.quotes} busy={busy} removeTrade={removeTrade}
           missingYears={local.archive?.missing} loadYears={loadYears} />}
         {tab === 'closed' && <Cycles ledger={ledger} quotes={market.quotes} busy={busy} missingYears={local.archive?.missing} loadYears={loadYears} />}
@@ -227,6 +225,7 @@ function App() {
           saveRules={rules => void change(current => ({ ...current, observationRules: rules }), { text: '观察规则已保存', area: 'rules' })}
           sync={synchronize} download={() => void run(async () => {
             if (local.archive?.missing.length) {
+              if (!bundledToken) throw Error(missingTokenBoxMessage);
               const complete = await loadArchiveYears(local, local.archive.missing, config.credential, config.secret);
               setLocal(complete);
               channel.current?.postMessage('update');

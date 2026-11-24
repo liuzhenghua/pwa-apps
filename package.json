@@ -13,7 +13,8 @@
     "dev:photo-layout": "npm run dev -w @pwa-apps/photo-layout",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "dev:stocks": "npm run dev -w @pwa-apps/stocks",
-    "test:stocks": "npm run test -w @pwa-apps/stocks"
+    "test:stocks": "npm run test -w @pwa-apps/stocks",
+    "stocks:alerts": "node --experimental-strip-types apps/stocks/monitor-alerts.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.7.0",

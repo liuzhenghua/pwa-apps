@@ -227,7 +227,14 @@ td small { margin-top: 2px; }
 .record-detail dd { margin: 3px 0 0; font-weight: 600; overflow-wrap: anywhere; }
 
 .entry-sheet[data-side="stock"] { height: min(345px, 76dvh); }
-.stock-detail-button { gap: 4px; min-height: 36px; padding-inline: 10px; }
+.stock-detail-button { width: 44px; min-height: 44px; }
+.watch-heading-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.entry-sheet[data-side="alerts"] { height: min(540px, 82dvh); }
+.alert-list { display: grid; gap: 8px; margin: 8px 0 12px; padding: 0; list-style: none; }
+.alert-list li { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.alert-list li > div { display: grid; gap: 2px; margin-right: auto; }
+.alert-device { margin: 12px 0; }
+.alert-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .price-headings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; color: var(--muted); font-size: var(--text-small); font-weight: 600; }
 .entry-stepper { display: grid; grid-template-columns: 42px minmax(0, 1fr) 42px; gap: 8px; }
 .entry-stepper button { padding-inline: 0; font-variant-numeric: tabular-nums; }
