@@ -90,14 +90,17 @@ function buyEstimate(quote?: Quote, reference?: PriceRecord) {
   const tone = difference > 0 ? 'gain' : difference < 0 ? 'loss' : '';
   const rate = Math.abs(percent(quote.price - reference.price, reference.price)).toFixed(2);
   const impact = difference === 0 ? '与上次买入同价' :
-    (difference > 0 ? '少付 ' : '多付 ') + money(Math.abs(difference)) +
-    (difference > 0 ? '（省 ' : '（贵 ') + rate + '%）';
-  return { quantity, cost, impact, tone };
+    (difference > 0 ? '省 ' : '贵 ') + money(Math.abs(difference));
+  const impactRate = difference === 0 ? '' : rate + '%';
+  return { quantity, cost, impact, impactRate, tone };
 }
 
 function BuyImpact({ estimate }: { estimate: NonNullable<ReturnType<typeof buyEstimate>> }) {
   return <span className="decision-impact"><span>买 {number.format(estimate.quantity)} 股</span>
-    <strong className={estimate.tone}>{estimate.impact}</strong></span>;
+    <strong className={'decision-impact-values ' + estimate.tone}>
+      <span>{estimate.impact}</span>
+      {estimate.impactRate && <span><span aria-hidden="true">· </span>{estimate.impactRate}</span>}
+    </strong></span>;
 }
 
 function cycleDecision(history: TradePrice[], quote: Quote | undefined, lastSell: PriceRecord | undefined, rules: ObservationRules) {
@@ -122,11 +125,11 @@ function cycleDecision(history: TradePrice[], quote: Quote | undefined, lastSell
     const partialSell = sellSignal?.scope === 'last-buy';
     const headline = sellSignal ? '卖出观察' : buyObservation ? '' : '观望';
     const sellImpact = profit === undefined || profitRate === undefined ? '' :
-      signedMoney(profit) + (sellSignal?.scope !== 'all' ? '（' + signedRate(profitRate) + '）' : '');
+      signedMoney(profit);
     const headlineMetric = sellSignal?.scope === 'all' ? '全卖 ' + signedRate(profitRate!) :
       partialSell ? '最近剩余批次 ' + number.format(sellSignal.quantity) + ' 股 · ' + priceComparison('剩余买价', quote.price, result.remainingBuyLots[0]) : '';
     return {
-      result, quantity, profit, profitRate, estimate, buyObservation, headline, headlineMetric, sellImpact,
+      result, quantity, profit, profitRate, estimate, buyObservation, headline, headlineMetric, sellImpact, sellImpactRate: sellSignal?.scope !== 'all' && profitRate !== undefined ? signedRate(profitRate) : '',
       labelTone: sellSignal ? 'gain' : 'neutral',
       tone: profit ? (profit > 0 ? 'gain' : 'loss') : '',
     };
@@ -146,11 +149,12 @@ function DecisionSignals({ decision }: { decision: NonNullable<ReturnType<typeof
 }
 
 function DecisionImpacts({ decision }: { decision: NonNullable<ReturnType<typeof cycleDecision>> }) {
-  const { sellImpact, estimate, tone } = decision;
+  const { sellImpact, sellImpactRate, estimate, tone } = decision;
   if (!sellImpact && !estimate) return null;
 
   return <span className="decision-impacts">
-    {sellImpact && <span className="decision-impact"><span>全卖预计</span><strong className={tone}>{sellImpact}</strong></span>}
+    {sellImpact && <span className="decision-impact"><span>全卖预计</span><strong className={'decision-impact-values ' + tone}><span>{sellImpact}</span>
+      {sellImpactRate && <span><span aria-hidden="true">· </span>{sellImpactRate}</span>}</strong></span>}
     {estimate && <BuyImpact estimate={estimate} />}
   </span>;
 }
@@ -179,7 +183,7 @@ function CyclePosition({ decision }: { decision: ReturnType<typeof cycleDecision
       <div>
         <h3>{estimate ? '买 ' + number.format(estimate.quantity) + ' 股' : '买入测算'}</h3>
         {estimate ? <p>需 {money(estimate.cost)}<br />
-          <strong className={estimate.tone}>{estimate.impact}</strong> · 相对上次买入金额</p> :
+          <strong className={estimate.tone}>{estimate.impact}{estimate.impactRate && '（' + estimate.impactRate + '）'}</strong> · 相对上次买入金额</p> :
           <p>需要最新报价和本周期最近买入的股数。</p>}
       </div>
     </div>

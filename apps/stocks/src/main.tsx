@@ -15,7 +15,7 @@ const tabLabels = { holdings: '持仓', trades: '交易', closed: '收益', sett
 type Tab = keyof typeof tabLabels;
 const tabIcons = { holdings: TrendingUp, trades: History, closed: CircleCheck, settings: Settings2 };
 
-type Feedback = { text: string; error?: boolean; area?: 'rules' };
+type Feedback = { text: string; error?: boolean; area?: 'rules' | 'startup-sync' };
 
 function App() {
   const [local, setLocal] = useState<LocalState>();
@@ -23,6 +23,13 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>();
   const [conflict, setConflict] = useState(false);
+  useEffect(() => {
+    if (feedback?.area !== 'startup-sync') return;
+    const timer = window.setTimeout(() => {
+      setFeedback(current => current === feedback ? undefined : current);
+    }, 2800);
+    return () => window.clearTimeout(timer);
+  }, [feedback]);
   const credentialKey = bundledToken ? 'stocks:cloud-passphrase' : 'stocks:token';
   const [config, setConfig] = useState<SyncConfig>(() => ({
     folder: readStored('stocks:sync-folder', ''),
@@ -171,7 +178,9 @@ function App() {
       setLocal(result.local);
       channel.current?.postMessage('update');
       setConflict(false);
-      if (!startup || result.message !== '本机与云端已同步') setFeedback({ text: result.message });
+      if (!startup || result.message !== '本机与云端已同步') {
+        setFeedback({ text: result.message, area: startup ? 'startup-sync' : undefined });
+      }
     });
   }
 
@@ -198,12 +207,13 @@ function App() {
         <div className="brand"><span className="brand-mark"><ChartNoAxesCombined size={22} /></span><strong>股票账簿</strong></div>
       </div>
     </header>
+    {feedback?.area === 'startup-sync' && <div className="startup-sync-toast" role="status">{feedback.text}</div>}
     <main className="shell">
       {(tab !== 'holdings' || !ledger) && <div className="page-heading">
         <h1>{tabLabels[tab]}</h1>
         {busy && <span className="busy" role="status"><RefreshCw size={16} /> 处理中</span>}
       </div>}
-      {feedback && feedback.area !== 'rules' && <div className={'feedback ' + (feedback.error ? 'error' : '')} role={feedback.error ? 'alert' : 'status'}>{feedback.text}</div>}
+      {feedback && !feedback.area && <div className={'feedback ' + (feedback.error ? 'error' : '')} role={feedback.error ? 'alert' : 'status'}>{feedback.text}</div>}
       {!local || !ledger ? <div className="panel muted">{feedback?.error
         ? <button onClick={() => void run(async () => setLocal(await readLocal()))}>重新读取数据</button>
         : '正在读取本机数据…'}</div> : <>
@@ -212,7 +222,7 @@ function App() {
           missingYears={local.archive?.missing} loadYears={loadYears} />}
         {tab === 'closed' && <Cycles ledger={ledger} quotes={market.quotes} busy={busy} missingYears={local.archive?.missing} loadYears={loadYears} />}
         {tab === 'settings' && <Settings local={local} busy={busy} conflict={conflict}
-          config={config} setConfig={updateConfig} feedback={feedback?.area === 'rules' ? undefined : feedback}
+          config={config} setConfig={updateConfig} feedback={feedback?.area ? undefined : feedback}
           rulesFeedback={feedback?.area === 'rules' ? feedback : undefined}
           saveRules={rules => void change(current => ({ ...current, observationRules: rules }), { text: '观察规则已保存', area: 'rules' })}
           sync={synchronize} download={() => void run(async () => {
