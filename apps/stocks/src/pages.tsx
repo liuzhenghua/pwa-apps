@@ -1,12 +1,86 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { Cloud, Download, Upload } from 'lucide-react';
 import { bundledToken, repository, type SyncDirection } from './backup.ts';
+import { defaultObservationRules, validateObservationRules, type ObservationRules, type RuleMatch } from './domain.ts';
 import { dateLabel } from './format.ts';
 import type { LocalState } from './store.ts';
 
+function RuleThreshold({ name, label, value, optional = false }: {
+  name: string; label: string; value: number | undefined; optional?: boolean;
+}) {
+  return <label className="rule-row">
+    <span>{label}{optional && <small>留空即停用</small>}</span>
+    <span className="rule-percent">
+      <input type="number" inputMode="decimal" min="0.01" max="100" step="0.01" name={name}
+        required={!optional} defaultValue={value} placeholder={optional ? '—' : undefined} />
+      <span aria-hidden="true">%</span>
+    </span>
+  </label>;
+}
+
+function RuleMode({ name, label, value }: { name: string; label: string; value: RuleMatch }) {
+  return <div className="rule-row" role="group" aria-label={label}>
+    <span>{label}</span>
+    <div className="rule-segment">
+      <label><input type="radio" name={name} value="any" defaultChecked={value === 'any'} /><span>任一满足</span></label>
+      <label><input type="radio" name={name} value="all" defaultChecked={value === 'all'} /><span>全部满足</span></label>
+    </div>
+  </div>;
+}
+
+function ObservationSettings({ rules, busy, save }: {
+  rules: ObservationRules; busy: boolean; save: (rules: ObservationRules) => void;
+}) {
+  const [error, setError] = useState('');
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const average = String(data.get('buyBelowAverage') ?? '');
+    try {
+      save(validateObservationRules({
+        activeBuyDrop: Number(data.get('activeBuyDrop')),
+        idleBuyDrop: Number(data.get('idleBuyDrop')),
+        buyBelowAverage: average === '' ? undefined : Number(average),
+        buyMatch: data.get('buyMatch') as RuleMatch,
+        sellAboveAverage: Number(data.get('sellAboveAverage')),
+        sellAboveLastBuy: Number(data.get('sellAboveLastBuy')),
+        sellMatch: data.get('sellMatch') as RuleMatch,
+      }));
+      setError('');
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : '规则无效');
+    }
+  }
+
+  return <form className="panel observation-settings" onSubmit={submit}>
+    <h2>买卖观察规则</h2>
+    <fieldset disabled={busy}>
+      <legend>买入观察</legend>
+      <RuleThreshold name="activeBuyDrop" label="周期内较最近成交回落" value={rules.activeBuyDrop} />
+      <RuleThreshold name="idleBuyDrop" label="无周期时较最近成交回落" value={rules.idleBuyDrop} />
+      <RuleThreshold name="buyBelowAverage" label="低于剩余均价" value={rules.buyBelowAverage} optional />
+      <RuleMode name="buyMatch" label="周期内触发条件" value={rules.buyMatch} />
+    </fieldset>
+    <fieldset disabled={busy}>
+      <legend>卖出观察</legend>
+      <RuleThreshold name="sellAboveAverage" label="全卖 · 高于剩余均价" value={rules.sellAboveAverage} />
+      <RuleThreshold name="sellAboveLastBuy" label="高于最近剩余批次买价" value={rules.sellAboveLastBuy} />
+      <RuleMode name="sellMatch" label="卖出触发条件" value={rules.sellMatch} />
+      <p className="muted">满足全卖门槛时提示全部剩余股数，否则提示最近一笔仍有剩余的买入批次。</p>
+    </fieldset>
+    {error && <p className="form-message" role="alert">{error}</p>}
+    <div className="actions">
+      <button type="button" disabled={busy} onClick={() => { setError(''); save(defaultObservationRules); }}>恢复默认</button>
+      <button className="primary" disabled={busy}>保存规则</button>
+    </div>
+  </form>;
+}
+
 export type SyncConfig = { folder: string; credential: string; secret: string };
-export function Settings({ local, busy, conflict, config, setConfig, feedback, sync, download, restore, clear }: {
+export function Settings({ local, busy, conflict, config, setConfig, feedback, saveRules, sync, download, restore, clear }: {
   local: LocalState; busy: boolean; conflict: boolean; config: SyncConfig; setConfig: (config: SyncConfig) => void; feedback?: { text: string; error?: boolean };
+  saveRules: (rules: ObservationRules) => void;
   sync: (direction: SyncDirection) => void; download: () => void;
   restore: (file: File) => void; clear: () => void;
 }) {
@@ -46,7 +120,7 @@ export function Settings({ local, busy, conflict, config, setConfig, feedback, s
           <h2 id="sync-config-title">同步配置</h2>
           <button type="button" disabled={busy} onClick={() => dialog.current?.close()}>关闭</button>
         </div>
-        <p className="muted sync-path">私有仓库 {repository} / stocks/{folder || '<名字>'}/ledger.json</p>
+        <p className="muted sync-path">私有仓库 {repository} / stocks/{folder || '<名字>'}/open.json</p>
         <fieldset disabled={busy}>
           <label>云端名字
             <input value={config.folder} onChange={event => editConfig({ ...config, folder: event.target.value })}
@@ -90,5 +164,7 @@ export function Settings({ local, busy, conflict, config, setConfig, feedback, s
         </div>
       </div>
     </section>
+    <ObservationSettings key={local.ledger.revision} rules={local.ledger.observationRules ?? defaultObservationRules}
+      busy={busy} save={saveRules} />
   </>;
 }

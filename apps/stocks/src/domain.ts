@@ -18,7 +18,7 @@ export type PriceRecord = { price: number; time: string; quantity?: number };
 export type TradePrice = PriceRecord & { kind: OrderKind };
 export type RecentPrices = Record<OrderKind, PriceRecord[]>;
 export type ClosedSummary = { realized: number; time: string; skipped: boolean };
-export type CycleBoundary = { count: number; endedAt: string };
+export type CycleBoundary = { count: number; endedAt: string; matching?: 'recent-buy' };
 export type Stock = {
   id: string;
   code: string;
@@ -43,12 +43,36 @@ type Order = {
 };
 export type Buy = Order & { kind: 'buy' };
 export type Sell = Order & { kind: 'sell'; matches: Match[] };
+export type RuleMatch = 'any' | 'all';
+export type ObservationRules = {
+  activeBuyDrop: number;
+  idleBuyDrop: number;
+  buyBelowAverage?: number;
+  buyMatch: RuleMatch;
+  sellAboveAverage: number;
+  sellAboveLastBuy: number;
+  sellMatch: RuleMatch;
+};
+export const defaultObservationRules: ObservationRules = {
+  activeBuyDrop: 1, idleBuyDrop: 2, buyMatch: 'any',
+  sellAboveAverage: 2, sellAboveLastBuy: 1, sellMatch: 'any',
+};
+
+export function validateObservationRules(rules: ObservationRules): ObservationRules {
+  const thresholds = [rules.activeBuyDrop, rules.idleBuyDrop, rules.sellAboveAverage, rules.sellAboveLastBuy];
+  if (rules.buyBelowAverage !== undefined) thresholds.push(rules.buyBelowAverage);
+  if (thresholds.some(value => !Number.isFinite(value) || value <= 0 || value > 100)) throw Error('阈值须大于 0%，且不超过 100%');
+  if (![rules.buyMatch, rules.sellMatch].every(match => match === 'any' || match === 'all')) throw Error('请选择条件组合方式');
+  return rules;
+}
+
 export type Ledger = {
   version: 1;
   revision: string;
   stocks: Stock[];
   orders: (Buy | Sell)[];
   profile: Profile;
+  observationRules?: ObservationRules;
 };
 export type Match = {
   lotId: string;
@@ -158,8 +182,8 @@ export function average(amount: number, quantity: number): string {
   return quantity ? decimal(amount).div(quantity).div(100).toFixed(4) : '—';
 }
 
-export function reachesBuyObservation(price: number, previousPrice: number): boolean {
-  return decimal(price).times(100).lte(decimal(previousPrice).times(99));
+export function reachesBuyObservation(price: number, previousPrice: number, drop = 1): boolean {
+  return decimal(price).times(100).lte(decimal(previousPrice).times(decimal(100).minus(drop)));
 }
 
 export function averageChange(beforeAmount: number, beforeShares: number, afterAmount: number, afterShares: number): number {
@@ -449,59 +473,69 @@ export function finishCycle(stock: Stock, orders: Ledger['orders'], endedAt: str
   const history = tradePrices(stock, orders);
   const count = activeCycle(stock, history).length;
   if (!count) return stock;
-  return { ...stock, history, cycles: [...(stock.cycles ?? []), { count, endedAt }] };
+  return { ...stock, history, cycles: [...(stock.cycles ?? []), { count, endedAt, matching: 'recent-buy' }] };
 }
 
-export function cycleResult(history: TradePrice[]) {
-  const pending: { price: number; quantity: number; kind: OrderKind }[] = [];
+export function cycleResult(history: TradePrice[], matchRecentBuys = true) {
+  const pending: { price: number; quantity: number; kind: OrderKind; time: string }[] = [];
   let start = 0;
   let matched = 0;
   let realized = 0;
   let skipped = false;
-  let lastBuyLot: Fill | undefined;
   for (const trade of [...history].reverse().sort((a, b) => a.time.localeCompare(b.time))) {
-    if (trade.kind === 'buy') lastBuyLot = undefined;
     if (trade.quantity === undefined) {
       skipped = true;
       continue;
     }
     let quantity = trade.quantity;
+    const newestFirst = matchRecentBuys && trade.kind === 'sell';
     while (quantity && start < pending.length && pending[start].kind !== trade.kind) {
-      const lot = pending[start];
+      const lot = pending[newestFirst ? pending.length - 1 : start];
       const count = Math.min(quantity, lot.quantity);
       const delta = trade.kind === 'sell' ? trade.price - lot.price : lot.price - trade.price;
       realized = sum([realized, safeInteger(delta * count)]);
       matched = sum([matched, count]);
       quantity -= count;
       lot.quantity -= count;
-      if (!lot.quantity) start++;
+      if (!lot.quantity) {
+        if (newestFirst) pending.pop();
+        else start++;
+      }
     }
-    if (quantity) {
-      const lot = { price: trade.price, kind: trade.kind, quantity };
-      pending.push(lot);
-      if (trade.kind === 'buy') lastBuyLot = lot;
-    }
+    if (quantity) pending.push({ ...trade, quantity });
   }
   const unmatchedKind = pending[start]?.kind;
   const remaining = pending.slice(start);
+  const remainingBuyLots = unmatchedKind === 'buy'
+    ? [...remaining].reverse().map(({ price, time, quantity }) => ({ price, time, quantity })) : [];
   return {
-    matched, realized, skipped, unmatchedKind,
+    matched, realized, skipped, unmatchedKind, remainingBuyLots,
     unmatched: sum(remaining.map(lot => lot.quantity)),
-    remainingBuyCost: unmatchedKind === 'buy' ? amountOf(remaining) : 0,
-    lastBuyLot: lastBuyLot?.quantity ? { price: lastBuyLot.price, quantity: lastBuyLot.quantity } : undefined,
+    remainingBuyCost: amountOf(remainingBuyLots),
   };
 }
 
-export function sellObservation(position: ReturnType<typeof cycleResult>, price: number) {
+export function buyObservationMatches(
+  price: number, reference: TradePrice | undefined, position: ReturnType<typeof cycleResult> | undefined, rules: ObservationRules,
+) {
+  const latest = !!reference && reachesBuyObservation(price, reference.price, position ? rules.activeBuyDrop : rules.idleBuyDrop);
+  const averageEnabled = !!position && rules.buyBelowAverage !== undefined;
+  const average = averageEnabled && position.unmatchedKind === 'buy' &&
+    decimal(price).times(position.unmatched).times(100)
+      .lte(decimal(position.remainingBuyCost).times(decimal(100).minus(rules.buyBelowAverage!)));
+  const triggered = averageEnabled && rules.buyMatch === 'all' ? latest && average : latest || average;
+  return { triggered, latest, average };
+}
+
+export function sellObservation(position: ReturnType<typeof cycleResult>, price: number, rules = defaultObservationRules) {
   if (position.unmatchedKind !== 'buy') return;
   const marketValue = decimal(price).times(position.unmatched);
-  if (marketValue.times(100).gte(decimal(position.remainingBuyCost).times(101))) {
-    return { scope: 'all' as const, quantity: position.unmatched };
-  }
-  const lot = position.lastBuyLot;
-  if (lot && decimal(price).times(100).gte(decimal(lot.price).times(101))) {
-    return { scope: 'last-buy' as const, quantity: lot.quantity };
-  }
+  const whole = marketValue.times(100).gte(decimal(position.remainingBuyCost).times(decimal(100).plus(rules.sellAboveAverage)));
+  const lot = position.remainingBuyLots[0];
+  const last = lot && decimal(price).times(100).gte(decimal(lot.price).times(decimal(100).plus(rules.sellAboveLastBuy)));
+  if (rules.sellMatch === 'all' && !(whole && last)) return;
+  if (whole) return { scope: 'all' as const, quantity: position.unmatched };
+  if (last) return { scope: 'last-buy' as const, quantity: lot.quantity };
 }
 
 function validatePriceRecord(record: PriceRecord) {
@@ -515,6 +549,7 @@ export function validateLedger(raw: unknown): Ledger {
   if (data?.version !== 1 || typeof data.revision !== 'string' || !data.revision ||
       !Array.isArray(data.stocks) || !Array.isArray(data.orders)) throw Error('无法识别股票备份格式');
   validateProfile(data.profile);
+  if (data.observationRules !== undefined) validateObservationRules(data.observationRules);
   const stocks = new Set<string>();
   const symbols = new Set<string>();
   for (const stock of data.stocks) {
@@ -543,6 +578,7 @@ export function validateLedger(raw: unknown): Ledger {
       for (const cycle of stock.cycles) {
         nonnegative(cycle.count, true);
         iso(cycle.endedAt);
+        if (cycle.matching !== undefined && cycle.matching !== 'recent-buy') throw Error('备份含无效周期配对方式');
       }
       if (sum(stock.cycles.map(cycle => cycle.count)) > stock.history.length) throw Error('周期超出交易记录范围');
     }

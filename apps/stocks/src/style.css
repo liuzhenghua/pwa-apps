@@ -143,9 +143,11 @@ td small { margin-top: 2px; }
 .watch-heading { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .watch-heading h2 { font-size: 1.12rem; }
 .watch-heading button { color: var(--muted); }
-.watch-quote { display: grid; grid-template-columns: minmax(65px, auto) 1fr; align-items: baseline; gap: 4px 9px; background: #edf3ff; border-radius: 9px; padding: 10px 12px; margin: 13px 0; }
+.watch-quote { display: grid; gap: 4px; background: #edf3ff; border-radius: 9px; padding: 10px 12px; margin: 13px 0; }
 .watch-quote strong { font-size: 1.45rem; color: var(--navy); font-variant-numeric: tabular-nums; }
-.watch-quote span:last-child { grid-column: 1 / -1; }
+.watch-quote-values { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.watch-day-change { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 3px 6px; font-size: .82rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.watch-day-change .muted { font-weight: 400; }
 .price-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .price-side { padding: 0; margin: 0; list-style: none; }
 .price-side li { border-bottom: 1px solid var(--line); }
@@ -324,3 +326,23 @@ td small { margin-top: 2px; }
   .decision-overview button:hover:not(:disabled):not(:active) { background: transparent; }
   .decision-overview button:active { background: #edf3ff; }
 }
+
+.observation-settings > fieldset { margin-top: 18px; }
+.observation-settings legend { padding: 0; color: var(--ink); font-size: 1rem; font-weight: 750; margin-bottom: 5px; }
+.rule-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 51px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: .85rem; color: var(--ink); }
+.rule-row > span:first-child { font-weight: 400; }
+.rule-row small { display: block; margin-top: 2px; color: var(--muted); font-weight: 400; }
+.rule-percent { flex: 0 0 80px; position: relative; color: var(--muted); }
+.rule-percent input { min-height: 37px; padding: 5px 24px 5px 5px; text-align: right; appearance: textfield; }
+.rule-percent input::-webkit-inner-spin-button, .rule-percent input::-webkit-outer-spin-button { appearance: none; margin: 0; }
+.rule-percent > span { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); pointer-events: none; font-size: .8rem; }
+.rule-segment { display: flex; flex-shrink: 0; padding: 2px; gap: 2px; border-radius: 8px; background: #eef3fb; }
+.rule-segment label { position: relative; display: block; }
+.rule-segment input { position: absolute; width: 1px; height: 1px; min-height: 0; opacity: 0; padding: 0; }
+.rule-segment label span { display: grid; place-items: center; min-height: 34px; padding: 3px 7px; border-radius: 6px; font-size: .76rem; white-space: nowrap; cursor: pointer; }
+.rule-segment input:checked + span { background: #fff; color: #154cbb; box-shadow: 0 1px 4px #234a7c24; }
+.rule-segment input:focus-visible + span { outline: 2px solid var(--blue); outline-offset: 1px; }
+.rule-segment input:disabled + span { opacity: .55; cursor: default; }
+.observation-settings fieldset p { margin-top: 8px; }
+.cycle-years { margin-bottom: 12px; }
+.year-download { margin-top: 10px; }

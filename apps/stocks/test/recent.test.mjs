@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { activeCycle, cycleResult, deleteTrade, finishCycle, compareSellPrice, emptyLedger, reachesBuyObservation, recentPrices, remainingPosition, recordPrice, sharesForAmount, sellObservation, tradePrices, validateLedger } from '../src/domain.ts';
+import { activeCycle, buyObservationMatches, defaultObservationRules, cycleResult, deleteTrade, finishCycle, compareSellPrice, emptyLedger, reachesBuyObservation, recentPrices, remainingPosition, recordPrice, sharesForAmount, sellObservation, tradePrices, validateLedger } from '../src/domain.ts';
 import { parseQuotes } from '../src/quotes.ts';
 
 const stock = { id: 'test', name: '600000', code: '600000', market: '沪市', price: 0, priceUpdatedAt: '2026-11-23T01:30:00.000Z' };
@@ -31,18 +31,20 @@ test('old orders supply starting prices without modifying their fills', () => {
 });
 
 test('decodes the quoted price and exchange time, dropping zero prices and mismatched symbols', () => {
-  function response(symbol, code, price) {
+  function response(symbol, code, price, close = '') {
     const fields = Array(31).fill('');
-    [fields[0], fields[1], fields[2], fields[3], fields[30]] = ['1', '浦发银行', code, price, '20261123140657'];
+    [fields[0], fields[1], fields[2], fields[3], fields[4], fields[30]] = ['1', '浦发银行', code, price, close, '20261123140657'];
     return `v_${symbol}="${fields.join('~')}";`;
   }
   const source = [
-    response('sh600000', '600000', '10.73'),
+    response('sh600000', '600000', '10.73', '10.87'),
     response('sz000001', '000001', '0.00'),
+    response('sz000002', '000002', '10.03'),
     response('sh600001', '600000', '11.03'),
   ].join('\r\n');
-  assert.deepEqual([...parseQuotes(source, ['sh600000', 'sz000001', 'sh600001'])], [
-    ['sh600000', { name: '浦发银行', price: 1073, time: '2026-11-23T06:06:57.000Z' }],
+  assert.deepEqual([...parseQuotes(source, ['sh600000', 'sz000001', 'sz000002', 'sh600001'])], [
+    ['sh600000', { name: '浦发银行', price: 1073, previousClose: 1087, time: '2026-11-23T06:06:57.000Z' }],
+    ['sz000002', { name: '浦发银行', price: 1003, time: '2026-11-23T06:06:57.000Z' }],
   ]);
 });
 
@@ -96,17 +98,17 @@ test('ending a cycle keeps all trades and starts a fresh cycle with the next rec
   const next = recordPrice(ended, [], 'buy', { ...entry(3747, 38), quantity: 30 });
   assert.equal(activeCycle(next, tradePrices(next, [])).length, 1);
   assert.deepEqual(cycleResult(tradePrices(bought, [])), {
-    matched: 200, realized: 11600, skipped: false, unmatched: 50, unmatchedKind: 'sell', remainingBuyCost: 0, lastBuyLot: undefined,
+    matched: 200, realized: 11600, skipped: false, unmatched: 50, unmatchedKind: 'sell', remainingBuyCost: 0, remainingBuyLots: [],
   });
   assert.deepEqual(validateLedger(JSON.parse(JSON.stringify({ ...emptyLedger(), stocks: [next] }))).stocks[0], next);
 });
 
-test('a cycle pairs more than three buys with one sell in the order recorded', () => {
+test('a cycle sells from the newest buy lots first', () => {
   const buys = Array.from({ length: 5 }, (_, index) => ({
     ...entry(1000 - index * 10, 30 + index), quantity: 100, kind: 'buy',
   })).reverse();
   const result = cycleResult([{ ...entry(1100, 36), quantity: 450, kind: 'sell' }, ...buys]);
-  assert.deepEqual(result, { matched: 450, realized: 53000, skipped: false, unmatched: 50, unmatchedKind: 'buy', remainingBuyCost: 48000, lastBuyLot: { price: 960, quantity: 50 } });
+  assert.deepEqual(result, { matched: 450, realized: 55000, skipped: false, unmatched: 50, unmatchedKind: 'buy', remainingBuyCost: 50000, remainingBuyLots: [{ ...entry(1000, 30), quantity: 50 }] });
 });
 
 test('deleting an old-cycle trade adjusts its boundary and leaves the current cycle intact', () => {
@@ -137,8 +139,46 @@ test('sell observation prefers the whole cycle above average and otherwise uses 
   const position = cycleResult(history);
   assert.equal(sellObservation(position, 1009), undefined);
   assert.deepEqual(sellObservation(position, 1010), { scope: 'last-buy', quantity: 200 });
-  assert.deepEqual(sellObservation(position, 1111), { scope: 'all', quantity: 400 });
+  assert.deepEqual(sellObservation(position, 1121), { scope: 'last-buy', quantity: 200 });
+  assert.deepEqual(sellObservation(position, 1122), { scope: 'all', quantity: 400 });
   const partial = cycleResult([{ ...entry(1000, 34), kind: 'sell', quantity: 350 }, ...history]);
-  assert.deepEqual(partial.lastBuyLot, { price: 1000, quantity: 50 });
-  assert.deepEqual(sellObservation(partial, 1010), { scope: 'all', quantity: 50 });
+  assert.deepEqual(partial.remainingBuyLots[0], { ...entry(1200, 32), quantity: 50 });
+  assert.equal(sellObservation(partial, 1010), undefined);
+  assert.deepEqual(sellObservation(partial, 1224), { scope: 'all', quantity: 50 });
+});
+
+test('observation rules combine thresholds and use a separate fallback outside cycles', () => {
+  const latest = { ...entry(1200, 33), kind: 'sell', quantity: 100 };
+  const position = cycleResult([{ ...entry(1000, 32), kind: 'buy', quantity: 200 }]);
+  assert.equal(buyObservationMatches(1188, latest, undefined, defaultObservationRules).triggered, false);
+  assert.equal(buyObservationMatches(1176, latest, undefined, defaultObservationRules).triggered, true);
+  const buy = { ...defaultObservationRules, buyBelowAverage: 1 };
+  assert.equal(buyObservationMatches(1188, latest, position, buy).triggered, true);
+  assert.equal(buyObservationMatches(1188, latest, position, { ...buy, buyMatch: 'all' }).triggered, false);
+  assert.equal(buyObservationMatches(990, latest, position, { ...buy, buyMatch: 'all' }).triggered, true);
+  const mixed = cycleResult([
+    { ...entry(1000, 33), kind: 'buy', quantity: 200 },
+    { ...entry(1200, 32), kind: 'buy', quantity: 200 },
+  ]);
+  assert.equal(sellObservation(mixed, 1010, { ...defaultObservationRules, sellMatch: 'all' }), undefined);
+  assert.deepEqual(sellObservation(mixed, 1122, { ...defaultObservationRules, sellMatch: 'all' }), { scope: 'all', quantity: 400 });
+  assert.equal(sellObservation(mixed, 1111, { ...defaultObservationRules, sellAboveAverage: 2, sellAboveLastBuy: 15 }), undefined);
+});
+
+test('sell reference stays on a partially used lot, then falls back to the prior buy', () => {
+  const buys = [
+    { ...entry(462, 31), kind: 'buy', quantity: 500 },
+    { ...entry(472, 30), kind: 'buy', quantity: 300 },
+  ];
+  const firstSale = { ...entry(480, 32), kind: 'sell', quantity: 300 };
+  const secondSale = { ...entry(478, 33), kind: 'sell', quantity: 200 };
+  assert.deepEqual(cycleResult(buys).remainingBuyLots[0], { ...entry(462, 31), quantity: 500 });
+  const partial = cycleResult([firstSale, ...buys]);
+  assert.deepEqual(partial.remainingBuyLots[0], { ...entry(462, 31), quantity: 200 });
+  assert.equal(partial.realized, 5400);
+  const complete = cycleResult([secondSale, firstSale, ...buys]);
+  assert.deepEqual(complete.remainingBuyLots, [{ ...entry(472, 30), quantity: 300 }]);
+  assert.equal(complete.remainingBuyCost, 141600);
+  assert.equal(complete.realized, 8600);
+  assert.deepEqual(cycleResult([firstSale, ...buys], false).remainingBuyLots, [{ ...entry(462, 31), quantity: 500 }]);
 });

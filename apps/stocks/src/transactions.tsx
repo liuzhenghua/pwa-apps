@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ChevronDown, Trash2 } from 'lucide-react';
 import { activeCycle, cycleResult, remainingPosition, sum, tradePrices, type Ledger, type OrderKind, type TradePrice } from './domain.ts';
+import { calendarYear } from './archive.ts';
 import { money, tradeDateLabel } from './format.ts';
 import { symbolFor, type Quote } from './quotes.ts';
 
@@ -52,8 +53,8 @@ function PositionSummary({ holdings, quotes, filtered }: {
   </section>;
 }
 
-export function Transactions({ ledger, quotes, busy, removeTrade }: {
-  ledger: Ledger; quotes: Map<string, Quote>; busy: boolean;
+export function Transactions({ ledger, quotes, busy, missingYears = [], loadYears, removeTrade }: {
+  ledger: Ledger; quotes: Map<string, Quote>; busy: boolean; missingYears?: string[]; loadYears: (years: string[]) => void;
   removeTrade: (stockId: string, index: number, entry: TradePrice) => Promise<boolean>;
 }) {
   const [kind, setKind] = useState<OrderKind | ''>('');
@@ -80,7 +81,11 @@ export function Transactions({ ledger, quotes, busy, removeTrade }: {
           onClick={() => setKind(option.id)}>{option.label}</button>)}
       </div>
     </div>
-    <PositionSummary holdings={holdings} quotes={quotes} filtered={!!kind} />
+    {missingYears.length ? <section className="panel">
+      <h2>往年交易尚未下载</h2>
+      <p className="muted">下方显示已下载的交易。加载完整历史后可查看持仓统计。</p>
+      <div className="actions"><button type="button" disabled={busy} onClick={() => loadYears(missingYears)}>下载全部历史</button></div>
+    </section> : <PositionSummary holdings={holdings} quotes={quotes} filtered={!!kind} />}
     {trades.length ? <ul className="panel trade-list editable-trades">
       {trades.map(({ stock, entry, index }) => <li key={stock.id + ':' + index}>
         <span className={'trade-badge ' + entry.kind}>{entry.kind === 'buy' ? '买入' : '卖出'}</span>
@@ -145,22 +150,33 @@ function CycleGroup({ title, entries }: { title: string; entries: CycleEntry[] }
   </section>;
 }
 
-export function Cycles({ ledger, quotes }: { ledger: Ledger; quotes: Map<string, Quote> }) {
+export function Cycles({ ledger, quotes, busy, missingYears = [], loadYears }: {
+  ledger: Ledger; quotes: Map<string, Quote>; busy: boolean; missingYears?: string[]; loadYears: (years: string[]) => void;
+}) {
+  const thisYear = calendarYear();
+  const [selectedYear, selectYear] = useState(thisYear);
+  const years = Array.from(new Set([thisYear, ...missingYears, ...ledger.stocks.flatMap(stock => [
+    ...(stock.cycles ?? []).map(cycle => calendarYear(cycle.endedAt)),
+    ...(stock.closed ?? []).map(summary => calendarYear(summary.time)),
+  ])])).sort((a, b) => b.localeCompare(a));
+  const year = years.includes(selectedYear) ? selectedYear : thisYear;
+  const waiting = missingYears.includes(year);
   const entries: CycleEntry[] = ledger.stocks.flatMap(stock => {
     const history = tradePrices(stock, ledger.orders);
     const name = quotes.get(symbolFor(stock))?.name ?? stock.name;
     const active = activeCycle(stock, history);
-    const current = active.length ? [{ key: stock.id, time: active[0].time, history: active, active: true }] : [];
+    const current = active.length ? [{ key: stock.id, time: active[0].time, history: active, active: true, recentBuy: true }] : [];
     let end = history.length;
-    const ended = (stock.cycles ?? []).map((cycle, index) => {
-      const start = end - cycle.count;
-      const records = history.slice(start, end);
-      end = start;
-      return { key: stock.id + ':' + index, time: cycle.endedAt, history: records, active: false };
+    const ended = (stock.cycles ?? []).flatMap((cycle, index) => {
+      const stop = end;
+      end -= cycle.count;
+      if (calendarYear(cycle.endedAt) !== year) return [];
+      return [{ key: stock.id + ':' + index, time: cycle.endedAt, history: history.slice(end, stop),
+        active: false, recentBuy: cycle.matching === 'recent-buy' }];
     });
     return [...current, ...ended].map(entry => {
       let result: CycleEntry['result'];
-      try { result = cycleResult(entry.history); } catch { /* Keep the cycle visible when its totals overflow. */ }
+      try { result = cycleResult(entry.history, entry.recentBuy); } catch { /* Keep the cycle visible when its totals overflow. */ }
       return { ...entry, name, code: stock.code, result };
     });
   }).sort((a, b) => b.time.localeCompare(a.time));
@@ -169,20 +185,27 @@ export function Cycles({ ledger, quotes }: { ledger: Ledger; quotes: Map<string,
   const ended = entries.filter(entry => !entry.active);
   const legacy = ledger.stocks.flatMap(stock => (stock.closed ?? []).map((summary, index) => ({
     summary, key: stock.id + ':' + index, name: quotes.get(symbolFor(stock))?.name ?? stock.name,
-  })));
+  }))).filter(({ summary }) => calendarYear(summary.time) === year);
 
   return <>
+    <div className="trade-filter-row cycle-years" role="group" aria-label="收益年份">
+      {years.map(item => <button key={item} type="button" disabled={busy} aria-pressed={item === year}
+        onClick={() => { selectYear(item); if (missingYears.includes(item)) loadYears([item]); }}>{item} 年</button>)}
+    </div>
     <section className="panel cycle-overview" aria-label="周期收益汇总">
-      <h2>周期收益汇总</h2>
+      <h2>{year} 年周期收益</h2>
       <dl>
         <ProfitMetric label="已结束周期收益" value={cycleTotal(ended)} />
         <ProfitMetric label="进行中已配对收益" value={cycleTotal(active)} />
       </dl>
-      <p className="muted">按周期内已配对的买卖价差计算，未扣手续费。</p>
+      <p className="muted">已结束周期按结束年份汇总。进行中单列，收益未扣手续费。</p>
     </section>
     <CycleGroup title="进行中" entries={active} />
     <CycleGroup title="已结束" entries={ended} />
-    {!entries.length && !legacy.length && <section className="panel empty"><h2>暂无做 T 周期</h2></section>}
+    {waiting ? <section className="panel empty">
+      <h2>{year} 年归档尚未下载</h2>
+      <button className="year-download" type="button" disabled={busy} onClick={() => loadYears([year])}>下载本年归档</button>
+    </section> : !ended.length && !legacy.length && <section className="panel empty"><h2>{year} 年暂无已结束周期</h2></section>}
     {legacy.length > 0 && <section className="panel">
       <h2>旧版清仓汇总</h2>
       <ul className="cycle-records">

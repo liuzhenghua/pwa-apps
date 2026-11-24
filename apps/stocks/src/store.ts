@@ -1,7 +1,8 @@
+import type { ArchiveState } from './archive.ts';
 import { emptyLedger, validateLedger, type Ledger } from './domain.ts';
 
 type SyncPoint = { revision: string; sha: string | null; time: number };
-export type LocalState = { ledger: Ledger; backupAt?: number; sync?: Record<string, SyncPoint> };
+export type LocalState = { ledger: Ledger; backupAt?: number; archive?: ArchiveState; sync?: Record<string, SyncPoint> };
 let database: Promise<IDBDatabase> | undefined;
 
 function open() {

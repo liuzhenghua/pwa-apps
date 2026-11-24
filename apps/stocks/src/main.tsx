@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ChartNoAxesCombined, CircleCheck, History, RefreshCw, Settings2, TrendingUp } from 'lucide-react';
 import { readStored, saveStored } from '@pwa-apps/shared';
-import { bundledToken, downloadLedger, SyncConflict, syncGithub, type SyncDirection } from './backup.ts';
+import { bundledToken, downloadLedger, loadArchiveYears, SyncConflict, syncGithub, type SyncDirection } from './backup.ts';
 import { deleteTrade, emptyLedger, finishCycle, recordPrice, validateLedger, type Ledger, type OrderKind, type Stock, type TradePrice } from './domain.ts';
 import { Settings, type SyncConfig } from './pages.tsx';
 import { useQuotes } from './quotes.ts';
@@ -171,6 +171,15 @@ function App() {
     });
   }
 
+  function loadYears(years: string[]) {
+    if (!local) return;
+    void run(async () => {
+      const next = await loadArchiveYears(local, years, config.credential, config.secret);
+      setLocal(next);
+      channel.current?.postMessage('update');
+    });
+  }
+
   return <>
     <header className="topbar">
       <div className="top-inner">
@@ -187,11 +196,18 @@ function App() {
         ? <button onClick={() => void run(async () => setLocal(await readLocal()))}>重新读取数据</button>
         : '正在读取本机数据…'}</div> : <>
         {tab === 'holdings' && <Watchlist ledger={ledger} busy={busy} add={saveStock} record={savePrice} endCycle={endCycle} removeTrade={removeTrade} remove={removeStock} market={market} />}
-        {tab === 'trades' && <Transactions ledger={ledger} quotes={market.quotes} busy={busy} removeTrade={removeTrade} />}
-        {tab === 'closed' && <Cycles ledger={ledger} quotes={market.quotes} />}
+        {tab === 'trades' && <Transactions ledger={ledger} quotes={market.quotes} busy={busy} removeTrade={removeTrade}
+          missingYears={local.archive?.missing} loadYears={loadYears} />}
+        {tab === 'closed' && <Cycles ledger={ledger} quotes={market.quotes} busy={busy} missingYears={local.archive?.missing} loadYears={loadYears} />}
         {tab === 'settings' && <Settings local={local} busy={busy} conflict={conflict}
           config={config} setConfig={updateConfig} feedback={feedback}
+          saveRules={rules => void change(current => ({ ...current, observationRules: rules }), '观察规则已保存')}
           sync={synchronize} download={() => void run(async () => {
+            if (local.archive?.missing.length) {
+              const complete = await loadArchiveYears(local, local.archive.missing, config.credential, config.secret);
+              setLocal(complete);
+              channel.current?.postMessage('update');
+            }
             const saved = await updateLocal(ledger.revision, current => ({ ...current, backupAt: Date.now() }));
             downloadLedger(saved.ledger);
             setLocal(saved);
@@ -201,7 +217,7 @@ function App() {
             const imported = validateLedger(JSON.parse(await file.text()));
             if (!window.confirm('用此备份覆盖本机股票和记录？')) return;
             const saved = await updateLocal(ledger.revision, current => ({
-              ...current, ledger: { ...imported, revision: crypto.randomUUID() },
+              ...current, archive: undefined, ledger: { ...imported, revision: crypto.randomUUID() },
             }));
             setLocal(saved);
             channel.current?.postMessage('update');

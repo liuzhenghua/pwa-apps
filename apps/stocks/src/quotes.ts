@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { cents, type Stock } from './domain.ts';
 
-export type Quote = { name: string; price: number; time: string };
+export type Quote = { name: string; price: number; time: string; previousClose?: number };
 type Symbol = Pick<Stock, 'code' | 'market'>;
 
 export function symbolFor(stock: Symbol): string {
@@ -22,7 +22,13 @@ export function parseQuotes(text: string, symbols: string[]): Map<string, Quote>
     const time = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}+08:00`);
     if (!Number.isFinite(time.getTime())) continue;
     try {
-      quotes.set(symbol, { name, price: cents(fields[3]), time: time.toISOString() });
+      const quote: Quote = { name, price: cents(fields[3]), time: time.toISOString() };
+      try {
+        quote.previousClose = cents(fields[4] ?? '');
+      } catch {
+        // Keep a valid latest price even when the previous close is missing.
+      }
+      quotes.set(symbol, quote);
     } catch {
       // A suspended or unavailable symbol may return a zero or blank price.
     }
