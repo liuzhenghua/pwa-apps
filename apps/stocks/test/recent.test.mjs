@@ -147,15 +147,13 @@ test('sell observation prefers the whole cycle above average and otherwise uses 
   assert.deepEqual(sellObservation(partial, 1224), { scope: 'all', quantity: 50 });
 });
 
-test('observation rules combine thresholds and use a separate fallback outside cycles', () => {
-  const latest = { ...entry(1200, 33), kind: 'sell', quantity: 100 };
-  const position = cycleResult([{ ...entry(1000, 32), kind: 'buy', quantity: 200 }]);
-  assert.equal(buyObservationMatches(1188, latest, undefined, defaultObservationRules).triggered, false);
-  assert.equal(buyObservationMatches(1176, latest, undefined, defaultObservationRules).triggered, true);
-  const buy = { ...defaultObservationRules, buyBelowAverage: 1 };
-  assert.equal(buyObservationMatches(1188, latest, position, buy).triggered, true);
-  assert.equal(buyObservationMatches(1188, latest, position, { ...buy, buyMatch: 'all' }).triggered, false);
-  assert.equal(buyObservationMatches(990, latest, position, { ...buy, buyMatch: 'all' }).triggered, true);
+test('buy observation uses the last sell and sell observation combines its configured thresholds', () => {
+  const latestSell = { ...entry(1200, 33), quantity: 100 };
+  assert.equal(buyObservationMatches(1188, latestSell, false, defaultObservationRules), false);
+  assert.equal(buyObservationMatches(1176, latestSell, false, defaultObservationRules), true);
+  assert.equal(buyObservationMatches(1188, latestSell, true, defaultObservationRules), true);
+  assert.equal(buyObservationMatches(1188, undefined, true, defaultObservationRules), false);
+  assert.equal(buyObservationMatches(1188, latestSell, true, { ...defaultObservationRules, activeBuyDrop: 2 }), false);
   const mixed = cycleResult([
     { ...entry(1000, 33), kind: 'buy', quantity: 200 },
     { ...entry(1200, 32), kind: 'buy', quantity: 200 },

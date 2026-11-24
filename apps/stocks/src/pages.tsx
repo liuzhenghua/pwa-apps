@@ -5,14 +5,14 @@ import { defaultObservationRules, validateObservationRules, type ObservationRule
 import { dateLabel } from './format.ts';
 import type { LocalState } from './store.ts';
 
-function RuleThreshold({ name, label, value, optional = false }: {
-  name: string; label: string; value: number | undefined; optional?: boolean;
+function RuleThreshold({ name, label, value }: {
+  name: string; label: string; value: number;
 }) {
   return <label className="rule-row">
-    <span>{label}{optional && <small>留空即停用</small>}</span>
+    <span>{label}</span>
     <span className="rule-percent">
       <input type="number" inputMode="decimal" min="0.01" max="100" step="0.01" name={name}
-        required={!optional} defaultValue={value} placeholder={optional ? '—' : undefined} />
+        required defaultValue={value} />
       <span aria-hidden="true">%</span>
     </span>
   </label>;
@@ -36,13 +36,10 @@ function ObservationSettings({ rules, busy, save }: {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    const average = String(data.get('buyBelowAverage') ?? '');
     try {
       save(validateObservationRules({
         activeBuyDrop: Number(data.get('activeBuyDrop')),
         idleBuyDrop: Number(data.get('idleBuyDrop')),
-        buyBelowAverage: average === '' ? undefined : Number(average),
-        buyMatch: data.get('buyMatch') as RuleMatch,
         sellAboveAverage: Number(data.get('sellAboveAverage')),
         sellAboveLastBuy: Number(data.get('sellAboveLastBuy')),
         sellMatch: data.get('sellMatch') as RuleMatch,
@@ -57,10 +54,8 @@ function ObservationSettings({ rules, busy, save }: {
     <h2>买卖观察规则</h2>
     <fieldset disabled={busy}>
       <legend>买入观察</legend>
-      <RuleThreshold name="activeBuyDrop" label="周期内较最近成交回落" value={rules.activeBuyDrop} />
-      <RuleThreshold name="idleBuyDrop" label="无周期时较最近成交回落" value={rules.idleBuyDrop} />
-      <RuleThreshold name="buyBelowAverage" label="低于剩余均价" value={rules.buyBelowAverage} optional />
-      <RuleMode name="buyMatch" label="周期内触发条件" value={rules.buyMatch} />
+      <RuleThreshold name="activeBuyDrop" label="周期内较最近卖价回落" value={rules.activeBuyDrop} />
+      <RuleThreshold name="idleBuyDrop" label="无周期时较最近卖价回落" value={rules.idleBuyDrop} />
     </fieldset>
     <fieldset disabled={busy}>
       <legend>卖出观察</legend>
