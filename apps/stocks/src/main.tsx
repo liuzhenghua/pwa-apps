@@ -30,6 +30,7 @@ function App() {
     secret: readStored('stocks:secret', ''),
   }));
   const job = useRef(false);
+  const checkedStartupSync = useRef(false);
   const channel = useRef<BroadcastChannel | undefined>(undefined);
 
   useEffect(() => {
@@ -154,7 +155,7 @@ function App() {
     } catch { /* Settings remain available for this session. */ }
   }
 
-  function synchronize(direction: SyncDirection) {
+  function synchronize(direction: SyncDirection, startup = false) {
     if (!local) return;
     void run(async () => {
       const result = await syncGithub(local, config.folder, config.credential, config.secret, direction, action =>
@@ -170,9 +171,17 @@ function App() {
       setLocal(result.local);
       channel.current?.postMessage('update');
       setConflict(false);
-      setFeedback({ text: result.message });
+      if (!startup || result.message !== '本机与云端已同步') setFeedback({ text: result.message });
     });
   }
+
+  useEffect(() => {
+    if (!local || checkedStartupSync.current) return;
+    checkedStartupSync.current = true;
+    if (navigator.onLine && config.folder.trim() && config.credential.trim() && config.secret) {
+      synchronize('auto', true);
+    }
+  });
 
   function loadYears(years: string[]) {
     if (!local) return;

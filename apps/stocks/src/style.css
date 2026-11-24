@@ -225,9 +225,9 @@ td small { margin-top: 2px; }
 .entry-sheet[data-side="stock"] { height: min(345px, 76dvh); }
 .stock-detail-button { gap: 4px; min-height: 36px; padding-inline: 10px; }
 .price-headings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; color: var(--muted); font-size: .78rem; font-weight: 650; }
-.quantity-stepper { display: grid; grid-template-columns: 42px minmax(0, 1fr) 42px; gap: 8px; }
-.quantity-stepper button { padding-inline: 0; font-variant-numeric: tabular-nums; }
-.quantity-stepper input { text-align: center; }
+.entry-stepper { display: grid; grid-template-columns: 42px minmax(0, 1fr) 42px; gap: 8px; }
+.entry-stepper button { padding-inline: 0; font-variant-numeric: tabular-nums; }
+.entry-stepper input { text-align: center; }
 .quick-amounts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
 .quick-amounts button { min-width: 0; min-height: 34px; padding: 4px 0; color: #184fae; background: #edf3ff; font-size: .75rem; font-variant-numeric: tabular-nums; }
 .estimate-amount { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding-top: 9px; color: var(--muted); font-size: .8rem; }
@@ -296,7 +296,7 @@ td small { margin-top: 2px; }
 .decision-quantity { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
 .decision-label { border-radius: 5px; padding: 2px 6px; background: #e9eff8; font-size: .75rem; font-weight: 650; }
 .decision-label.gain { background: #fce9ee; }
-.decision-label.loss { background: #e1f5eb; }
+.decision-label.neutral { background: #eef1f5; color: var(--muted); }
 .decision-title .buy { color: #154cbb; }
 .decision-label.buy { background: #eaf1ff; }
 .decision-overview button svg { flex-shrink: 0; color: var(--muted); }
@@ -369,3 +369,5 @@ td small { margin-top: 2px; }
 .decision-signal { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; }
 .rule-save-status:empty { display: none; }
 .rule-save-status { margin-right: auto; color: #087451; font-size: .81rem; }
+
+.decision-impacts-single > .decision-impact { grid-column: 1 / -1; }
