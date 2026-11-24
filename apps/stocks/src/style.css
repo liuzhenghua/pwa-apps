@@ -367,3 +367,5 @@ td small { margin-top: 2px; }
   .editable-trades .icon-button { width: 38px; min-height: 44px; border-color: transparent; background: transparent; }
 }
 .decision-signal { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; }
+.rule-save-status:empty { display: none; }
+.rule-save-status { margin-right: auto; color: #087451; font-size: .81rem; }

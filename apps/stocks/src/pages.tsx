@@ -28,10 +28,11 @@ function RuleMode({ name, label, value }: { name: string; label: string; value: 
   </div>;
 }
 
-function ObservationSettings({ rules, busy, save }: {
-  rules: ObservationRules; busy: boolean; save: (rules: ObservationRules) => void;
+function ObservationSettings({ rules, busy, save, feedback }: {
+  rules: ObservationRules; busy: boolean; save: (rules: ObservationRules) => void; feedback?: { text: string; error?: boolean };
 }) {
   const [error, setError] = useState('');
+  const [editing, setEditing] = useState(false);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,6 +40,7 @@ function ObservationSettings({ rules, busy, save }: {
     try {
       save(validateObservationRules({
         activeBuyDrop: Number(data.get('activeBuyDrop')),
+        activeBuyDropFromBuy: Number(data.get('activeBuyDropFromBuy')),
         idleBuyDrop: Number(data.get('idleBuyDrop')),
         sellAboveAverage: Number(data.get('sellAboveAverage')),
         sellAboveLastBuy: Number(data.get('sellAboveLastBuy')),
@@ -50,11 +52,12 @@ function ObservationSettings({ rules, busy, save }: {
     }
   }
 
-  return <form className="panel observation-settings" onSubmit={submit}>
+  return <form className="panel observation-settings" onSubmit={submit} onChange={() => setEditing(true)}>
     <h2>买卖观察规则</h2>
     <fieldset disabled={busy}>
       <legend>买入观察</legend>
       <RuleThreshold name="activeBuyDrop" label="周期内较最近卖价回落" value={rules.activeBuyDrop} />
+      <RuleThreshold name="activeBuyDropFromBuy" label="周期内较最近买价回落" value={rules.activeBuyDropFromBuy ?? defaultObservationRules.activeBuyDropFromBuy} />
       <RuleThreshold name="idleBuyDrop" label="无周期时较最近卖价回落" value={rules.idleBuyDrop} />
     </fieldset>
     <fieldset disabled={busy}>
@@ -66,15 +69,18 @@ function ObservationSettings({ rules, busy, save }: {
     </fieldset>
     {error && <p className="form-message" role="alert">{error}</p>}
     <div className="actions">
+      <span className="rule-save-status" role="status" aria-live="polite">{!editing && !feedback?.error ? feedback?.text : ''}</span>
       <button type="button" disabled={busy} onClick={() => { setError(''); save(defaultObservationRules); }}>恢复默认</button>
       <button className="primary" disabled={busy}>保存规则</button>
     </div>
+    {feedback?.error && <p className="form-message" role="alert">{feedback.text}</p>}
   </form>;
 }
 
 export type SyncConfig = { folder: string; credential: string; secret: string };
-export function Settings({ local, busy, conflict, config, setConfig, feedback, saveRules, sync, download, restore, clear }: {
+export function Settings({ local, busy, conflict, config, setConfig, feedback, rulesFeedback, saveRules, sync, download, restore, clear }: {
   local: LocalState; busy: boolean; conflict: boolean; config: SyncConfig; setConfig: (config: SyncConfig) => void; feedback?: { text: string; error?: boolean };
+  rulesFeedback?: { text: string; error?: boolean };
   saveRules: (rules: ObservationRules) => void;
   sync: (direction: SyncDirection) => void; download: () => void;
   restore: (file: File) => void; clear: () => void;
@@ -160,6 +166,6 @@ export function Settings({ local, busy, conflict, config, setConfig, feedback, s
       </div>
     </section>
     <ObservationSettings key={local.ledger.revision} rules={local.ledger.observationRules ?? defaultObservationRules}
-      busy={busy} save={saveRules} />
+      busy={busy} save={saveRules} feedback={rulesFeedback} />
   </>;
 }

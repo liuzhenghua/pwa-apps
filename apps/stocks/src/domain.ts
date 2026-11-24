@@ -46,18 +46,20 @@ export type Sell = Order & { kind: 'sell'; matches: Match[] };
 export type RuleMatch = 'any' | 'all';
 export type ObservationRules = {
   activeBuyDrop: number;
+  activeBuyDropFromBuy?: number;
   idleBuyDrop: number;
   sellAboveAverage: number;
   sellAboveLastBuy: number;
   sellMatch: RuleMatch;
 };
-export const defaultObservationRules: ObservationRules = {
-  activeBuyDrop: 1, idleBuyDrop: 2,
+export const defaultObservationRules: Required<ObservationRules> = {
+  activeBuyDrop: 1, activeBuyDropFromBuy: 2, idleBuyDrop: 2,
   sellAboveAverage: 2, sellAboveLastBuy: 1, sellMatch: 'any',
 };
 
 export function validateObservationRules(rules: ObservationRules): ObservationRules {
   const thresholds = [rules.activeBuyDrop, rules.idleBuyDrop, rules.sellAboveAverage, rules.sellAboveLastBuy];
+  if (rules.activeBuyDropFromBuy !== undefined) thresholds.push(rules.activeBuyDropFromBuy);
   if (thresholds.some(value => !Number.isFinite(value) || value <= 0 || value > 100)) throw Error('阈值须大于 0%，且不超过 100%');
   if (rules.sellMatch !== 'any' && rules.sellMatch !== 'all') throw Error('请选择条件组合方式');
   return rules;
@@ -511,7 +513,7 @@ export function buyObservationMatches(price: number, lastSell: PriceRecord | und
   return !!lastSell && reachesBuyObservation(price, lastSell.price, active ? rules.activeBuyDrop : rules.idleBuyDrop);
 }
 
-export function sellObservation(position: ReturnType<typeof cycleResult>, price: number, rules = defaultObservationRules) {
+export function sellObservation(position: ReturnType<typeof cycleResult>, price: number, rules: ObservationRules = defaultObservationRules) {
   if (position.unmatchedKind !== 'buy') return;
   const marketValue = decimal(price).times(position.unmatched);
   const whole = marketValue.times(100).gte(decimal(position.remainingBuyCost).times(decimal(100).plus(rules.sellAboveAverage)));

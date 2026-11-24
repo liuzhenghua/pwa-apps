@@ -15,11 +15,13 @@ const tabLabels = { holdings: '持仓', trades: '交易', closed: '收益', sett
 type Tab = keyof typeof tabLabels;
 const tabIcons = { holdings: TrendingUp, trades: History, closed: CircleCheck, settings: Settings2 };
 
+type Feedback = { text: string; error?: boolean; area?: 'rules' };
+
 function App() {
   const [local, setLocal] = useState<LocalState>();
   const [tab, setTab] = useState<Tab>('holdings');
   const [busy, setBusy] = useState(false);
-  const [feedback, setFeedback] = useState<{ text: string; error?: boolean }>();
+  const [feedback, setFeedback] = useState<Feedback>();
   const [conflict, setConflict] = useState(false);
   const credentialKey = bundledToken ? 'stocks:cloud-passphrase' : 'stocks:token';
   const [config, setConfig] = useState<SyncConfig>(() => ({
@@ -60,7 +62,7 @@ function App() {
     window.scrollTo(0, 0);
   }
 
-  async function run(operation: () => Promise<void>) {
+  async function run(operation: () => Promise<void>, area?: Feedback['area']) {
     if (job.current) return false;
     job.current = true;
     setBusy(true);
@@ -70,7 +72,7 @@ function App() {
       return true;
     } catch (error) {
       setConflict(error instanceof SyncConflict);
-      setFeedback({ text: error instanceof Error ? error.message : String(error), error: true });
+      setFeedback({ text: error instanceof Error ? error.message : String(error), error: true, area });
       const latest = await readLocal().catch(() => undefined);
       if (latest) setLocal(latest);
       return false;
@@ -80,8 +82,9 @@ function App() {
     }
   }
 
-  async function change(update: (current: Ledger) => Ledger, message: string, extra?: (current: LocalState) => LocalState) {
+  async function change(update: (current: Ledger) => Ledger, message: string | Feedback, extra?: (current: LocalState) => LocalState) {
     if (!local) return false;
+    const notice = typeof message === 'string' ? { text: message } : message;
     return run(async () => {
       const saved = await updateLocal(local.ledger.revision, current => ({
         ...(extra ? extra(current) : current),
@@ -89,8 +92,8 @@ function App() {
       }));
       setLocal(saved);
       channel.current?.postMessage('update');
-      setFeedback({ text: message });
-    });
+      setFeedback(notice);
+    }, notice.area);
   }
 
   function saveStock(stock: Stock) {
@@ -191,7 +194,7 @@ function App() {
         <h1>{tabLabels[tab]}</h1>
         {busy && <span className="busy" role="status"><RefreshCw size={16} /> 处理中</span>}
       </div>}
-      {feedback && <div className={'feedback ' + (feedback.error ? 'error' : '')} role={feedback.error ? 'alert' : 'status'}>{feedback.text}</div>}
+      {feedback && feedback.area !== 'rules' && <div className={'feedback ' + (feedback.error ? 'error' : '')} role={feedback.error ? 'alert' : 'status'}>{feedback.text}</div>}
       {!local || !ledger ? <div className="panel muted">{feedback?.error
         ? <button onClick={() => void run(async () => setLocal(await readLocal()))}>重新读取数据</button>
         : '正在读取本机数据…'}</div> : <>
@@ -200,8 +203,9 @@ function App() {
           missingYears={local.archive?.missing} loadYears={loadYears} />}
         {tab === 'closed' && <Cycles ledger={ledger} quotes={market.quotes} busy={busy} missingYears={local.archive?.missing} loadYears={loadYears} />}
         {tab === 'settings' && <Settings local={local} busy={busy} conflict={conflict}
-          config={config} setConfig={updateConfig} feedback={feedback}
-          saveRules={rules => void change(current => ({ ...current, observationRules: rules }), '观察规则已保存')}
+          config={config} setConfig={updateConfig} feedback={feedback?.area === 'rules' ? undefined : feedback}
+          rulesFeedback={feedback?.area === 'rules' ? feedback : undefined}
+          saveRules={rules => void change(current => ({ ...current, observationRules: rules }), { text: '观察规则已保存', area: 'rules' })}
           sync={synchronize} download={() => void run(async () => {
             if (local.archive?.missing.length) {
               const complete = await loadArchiveYears(local, local.archive.missing, config.credential, config.secret);
