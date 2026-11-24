@@ -47,9 +47,13 @@ function PositionSummary({ holdings, quotes, filtered }: {
       <ProfitMetric label="浮动盈亏" value={profit} />
       <ProfitMetric label="已实现盈亏" value={realized} />
     </dl>
-    <p className="muted">{issue || '卖出优先扣减最低买价。浮动盈亏按最新价估算，已实现盈亏按成交价计算。两者均未扣手续费。'}</p>
-    {skipped && <p className="muted">缺少股数的记录和超出已记录买入的卖出股数已跳过。</p>}
-    {filtered && <p className="muted">买卖方向只筛选下方列表，持仓按全部买卖计算。</p>}
+    {issue && <p className="muted">{issue}</p>}
+    <details className="position-explanation">
+      <summary>计算说明{skipped ? ' · 部分记录已跳过' : ''}</summary>
+      <p>卖出优先扣减最低买价。浮动盈亏按最新价估算，已实现盈亏按成交价计算。两者均未扣手续费。</p>
+      {skipped && <p>缺少股数的记录和超出已记录买入的卖出股数已跳过。</p>}
+      {filtered && <p>买卖方向只筛选下方列表，持仓按全部买卖计算。</p>}
+    </details>
   </section>;
 }
 
@@ -67,12 +71,12 @@ export function Transactions({ ledger, quotes, busy, missingYears = [], loadYear
 
   return <>
     <div className="trade-filters">
-      <div className="trade-filter-row" role="group" aria-label="按股票筛选">
+      <div className="trade-filter-row stock-filter-strip" role="group" aria-label="按股票筛选">
         <button type="button" aria-pressed={!stockId} onClick={() => setStockId('')}>全部股票</button>
         {ledger.stocks.map(stock => <button type="button" key={stock.id} aria-pressed={stock.id === stockId}
           onClick={() => setStockId(stock.id)}>{quotes.get(symbolFor(stock))?.name ?? stock.name}</button>)}
       </div>
-      <div className="trade-filter-row" role="group" aria-label="按买卖方向筛选">
+      <div className="trade-filter-row trade-direction-filter" role="group" aria-label="按买卖方向筛选">
         {([
           { id: '', label: '全部交易' },
           { id: 'buy', label: '买入' },

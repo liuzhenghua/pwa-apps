@@ -346,3 +346,23 @@ td small { margin-top: 2px; }
 .observation-settings fieldset p { margin-top: 8px; }
 .cycle-years { margin-bottom: 12px; }
 .year-download { margin-top: 10px; }
+
+.trade-filters { min-width: 0; gap: 7px; }
+.stock-filter-strip { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: thin; padding: 3px; margin-inline: -3px; }
+.stock-filter-strip button { flex: 0 0 auto; white-space: nowrap; }
+.trade-filters .trade-filter-row button { min-height: 36px; padding: 4px 10px; font-size: .79rem; font-weight: 550; }
+.trade-filters .trade-filter-row button[aria-pressed="true"] { font-weight: 650; }
+.position-explanation { margin-top: 9px; color: var(--muted); font-size: .75rem; }
+.position-explanation summary { cursor: pointer; width: fit-content; }
+.position-explanation p { margin-top: 5px; }
+.position-summary dd { overflow-x: auto; white-space: nowrap; scrollbar-width: thin; padding-bottom: 2px; }
+@media (max-width: 669px) {
+  .position-summary dl { gap: 6px; }
+  .position-summary dt { font-size: .72rem; }
+  .position-summary dd { font-size: clamp(.82rem, 3.9vw, 1rem); }
+  .editable-trades { padding-block: 5px; }
+  .editable-trades li { gap: 7px; padding: 7px 0; }
+  .editable-trades li strong { font-size: .88rem; line-height: 1.25; font-weight: 650; }
+  .editable-trades li .muted { font-size: .73rem; }
+  .editable-trades .icon-button { width: 38px; min-height: 44px; border-color: transparent; background: transparent; }
+}
