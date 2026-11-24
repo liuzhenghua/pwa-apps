@@ -158,6 +158,10 @@ export function average(amount: number, quantity: number): string {
   return quantity ? decimal(amount).div(quantity).div(100).toFixed(4) : '—';
 }
 
+export function reachesBuyObservation(price: number, previousPrice: number): boolean {
+  return decimal(price).times(100).lte(decimal(previousPrice).times(99));
+}
+
 export function averageChange(beforeAmount: number, beforeShares: number, afterAmount: number, afterShares: number): number {
   return decimal(afterAmount).times(beforeShares).div(decimal(beforeAmount).times(afterShares))
     .minus(1).times(100).toDecimalPlaces(8).toNumber();
@@ -454,7 +458,9 @@ export function cycleResult(history: TradePrice[]) {
   let matched = 0;
   let realized = 0;
   let skipped = false;
+  let lastBuyLot: Fill | undefined;
   for (const trade of [...history].reverse().sort((a, b) => a.time.localeCompare(b.time))) {
+    if (trade.kind === 'buy') lastBuyLot = undefined;
     if (trade.quantity === undefined) {
       skipped = true;
       continue;
@@ -470,7 +476,11 @@ export function cycleResult(history: TradePrice[]) {
       lot.quantity -= count;
       if (!lot.quantity) start++;
     }
-    if (quantity) pending.push({ price: trade.price, kind: trade.kind, quantity });
+    if (quantity) {
+      const lot = { price: trade.price, kind: trade.kind, quantity };
+      pending.push(lot);
+      if (trade.kind === 'buy') lastBuyLot = lot;
+    }
   }
   const unmatchedKind = pending[start]?.kind;
   const remaining = pending.slice(start);
@@ -478,7 +488,20 @@ export function cycleResult(history: TradePrice[]) {
     matched, realized, skipped, unmatchedKind,
     unmatched: sum(remaining.map(lot => lot.quantity)),
     remainingBuyCost: unmatchedKind === 'buy' ? amountOf(remaining) : 0,
+    lastBuyLot: lastBuyLot?.quantity ? { price: lastBuyLot.price, quantity: lastBuyLot.quantity } : undefined,
   };
+}
+
+export function sellObservation(position: ReturnType<typeof cycleResult>, price: number) {
+  if (position.unmatchedKind !== 'buy') return;
+  const marketValue = decimal(price).times(position.unmatched);
+  if (marketValue.times(100).gte(decimal(position.remainingBuyCost).times(101))) {
+    return { scope: 'all' as const, quantity: position.unmatched };
+  }
+  const lot = position.lastBuyLot;
+  if (lot && decimal(price).times(100).gte(decimal(lot.price).times(101))) {
+    return { scope: 'last-buy' as const, quantity: lot.quantity };
+  }
 }
 
 function validatePriceRecord(record: PriceRecord) {

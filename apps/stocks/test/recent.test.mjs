@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { activeCycle, cycleResult, deleteTrade, finishCycle, compareSellPrice, emptyLedger, recentPrices, remainingPosition, recordPrice, sharesForAmount, tradePrices, validateLedger } from '../src/domain.ts';
+import { activeCycle, cycleResult, deleteTrade, finishCycle, compareSellPrice, emptyLedger, reachesBuyObservation, recentPrices, remainingPosition, recordPrice, sharesForAmount, sellObservation, tradePrices, validateLedger } from '../src/domain.ts';
 import { parseQuotes } from '../src/quotes.ts';
 
 const stock = { id: 'test', name: '600000', code: '600000', market: '沪市', price: 0, priceUpdatedAt: '2026-11-23T01:30:00.000Z' };
@@ -96,7 +96,7 @@ test('ending a cycle keeps all trades and starts a fresh cycle with the next rec
   const next = recordPrice(ended, [], 'buy', { ...entry(3747, 38), quantity: 30 });
   assert.equal(activeCycle(next, tradePrices(next, [])).length, 1);
   assert.deepEqual(cycleResult(tradePrices(bought, [])), {
-    matched: 200, realized: 11600, skipped: false, unmatched: 50, unmatchedKind: 'sell', remainingBuyCost: 0,
+    matched: 200, realized: 11600, skipped: false, unmatched: 50, unmatchedKind: 'sell', remainingBuyCost: 0, lastBuyLot: undefined,
   });
   assert.deepEqual(validateLedger(JSON.parse(JSON.stringify({ ...emptyLedger(), stocks: [next] }))).stocks[0], next);
 });
@@ -106,7 +106,7 @@ test('a cycle pairs more than three buys with one sell in the order recorded', (
     ...entry(1000 - index * 10, 30 + index), quantity: 100, kind: 'buy',
   })).reverse();
   const result = cycleResult([{ ...entry(1100, 36), quantity: 450, kind: 'sell' }, ...buys]);
-  assert.deepEqual(result, { matched: 450, realized: 53000, skipped: false, unmatched: 50, unmatchedKind: 'buy', remainingBuyCost: 48000 });
+  assert.deepEqual(result, { matched: 450, realized: 53000, skipped: false, unmatched: 50, unmatchedKind: 'buy', remainingBuyCost: 48000, lastBuyLot: { price: 960, quantity: 50 } });
 });
 
 test('deleting an old-cycle trade adjusts its boundary and leaves the current cycle intact', () => {
@@ -120,4 +120,25 @@ test('deleting an old-cycle trade adjusts its boundary and leaves the current cy
   assert.deepEqual(activeCycle(corrected, tradePrices(corrected, [])), [history[0]]);
   assert.deepEqual(corrected.recent.buy.map(item => item.price), [900]);
   assert.throws(() => deleteTrade(corrected, [], 2, history[2]), /已变化/);
+});
+
+test('buy observation begins at a 1% price drop from the last fill', () => {
+  assert.equal(reachesBuyObservation(990, 1000), true);
+  assert.equal(reachesBuyObservation(991, 1000), false);
+  assert.equal(reachesBuyObservation(2399, 2424), true);
+  assert.equal(reachesBuyObservation(2400, 2424), false);
+});
+
+test('sell observation prefers the whole cycle above average and otherwise uses the latest unsold buy', () => {
+  const history = [
+    { ...entry(1000, 33), kind: 'buy', quantity: 200 },
+    { ...entry(1200, 32), kind: 'buy', quantity: 200 },
+  ];
+  const position = cycleResult(history);
+  assert.equal(sellObservation(position, 1009), undefined);
+  assert.deepEqual(sellObservation(position, 1010), { scope: 'last-buy', quantity: 200 });
+  assert.deepEqual(sellObservation(position, 1111), { scope: 'all', quantity: 400 });
+  const partial = cycleResult([{ ...entry(1000, 34), kind: 'sell', quantity: 350 }, ...history]);
+  assert.deepEqual(partial.lastBuyLot, { price: 1000, quantity: 50 });
+  assert.deepEqual(sellObservation(partial, 1010), { scope: 'all', quantity: 50 });
 });

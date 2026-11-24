@@ -299,3 +299,28 @@ td small { margin-top: 2px; }
 .decision-label.buy { background: #eaf1ff; }
 .decision-overview button svg { flex-shrink: 0; color: var(--muted); }
 .watch-card { scroll-margin-top: 12px; }
+
+@media (max-width: 669px) {
+  .top-inner { padding: 8px 14px; }
+  .brand-mark { width: 31px; height: 31px; }
+  .shell { padding: 15px 12px calc(84px + env(safe-area-inset-bottom)); }
+  .watch-toolbar { margin-bottom: 10px; }
+  .decision-overview { padding: 11px 12px; }
+  .decision-overview ul { margin-top: 4px; }
+  .decision-overview button { gap: 4px; padding: 8px 0; }
+  .decision-overview button svg { width: 13px; }
+  .decision-overview-copy { flex: 1; gap: 5px; }
+  .decision-title { gap: 2px 6px; }
+  .decision-title .decision-label { padding-inline: 4px; font-size: .72rem; }
+  .decision-title strong:not(:first-child) { font-size: .8rem; }
+  .decision-impacts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 6px; }
+  .decision-impacts .decision-impact { display: grid; gap: 2px; padding: 4px 6px; }
+  .decision-impacts > .decision-comparison { grid-column: 1 / -1; }
+  .decision-overview > p { margin-top: 6px; font-size: .75rem; }
+  .bottom-nav { height: calc(60px + env(safe-area-inset-bottom)); padding-top: 4px; padding-bottom: calc(4px + env(safe-area-inset-bottom)); }
+  .bottom-nav button { min-height: 48px; }
+}
+@media (hover: none) {
+  .decision-overview button:hover:not(:disabled):not(:active) { background: transparent; }
+  .decision-overview button:active { background: #edf3ff; }
+}
