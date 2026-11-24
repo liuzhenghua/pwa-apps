@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react';
 import { Bell, ChevronRight, Info, Plus, RefreshCw } from 'lucide-react';
 import { AlertSheet } from './alert-sheet.tsx';
+import { createAlertCloud } from './alert-cloud.ts';
 import type { SyncConfig } from './pages.tsx';
 import { activeCycle, average, cents, compareSellPrice, cycleResult, buyObservationMatches, defaultObservationRules, percent, reachesBuyObservation, recentPrices, sellObservation, sum, shares, sharesForAmount, shareStep, sameTrade, tradePrices, type Ledger, type ObservationRules, type OrderKind, type PriceRecord, type Stock, type TradePrice } from './domain.ts';
 import { money, tradeDateLabel } from './format.ts';
@@ -251,6 +252,8 @@ function SellPreview({ buys, value, quantity }: { buys: PriceRecord[]; value: st
 }
 
 export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, remove, market, syncConfig }: Props) {
+  const alertCloud = useMemo(() => createAlertCloud(syncConfig.credential), [syncConfig.credential]);
+  useEffect(() => { void alertCloud.refresh(); }, [alertCloud]);
   const { quotes, missing, loading, refresh } = market;
   const [editor, setEditor] = useState<Editor>();
   const [value, setValue] = useState<string>();
@@ -461,7 +464,7 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
         pressedBackdrop.current = false;
         if (!addMode && !busy && tappedBackdrop) event.currentTarget.close();
       }}>
-      {editor?.type === 'alerts' ? <AlertSheet credential={syncConfig.credential} symbol={symbolFor(editor.stock)}
+      {editor?.type === 'alerts' ? <AlertSheet cloud={alertCloud} symbol={symbolFor(editor.stock)}
         name={editorQuote?.name ?? editor.stock.name} close={() => dialog.current?.close()} />
         : editor && <form onSubmit={event => void submit(event)}>
         <div className="section-title editor-heading">

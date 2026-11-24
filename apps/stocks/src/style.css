@@ -234,7 +234,13 @@ td small { margin-top: 2px; }
 .alert-list li { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
 .alert-list li > div { display: grid; gap: 2px; margin-right: auto; }
 .alert-device { margin: 12px 0; }
-.alert-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.alert-rebind { font-size: var(--text-small); }
+.alert-actions { display: grid; gap: 8px; }
+.alert-directions, .alert-entry { display: grid; gap: 8px; }
+.alert-directions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.alert-directions button[aria-pressed="true"] { color: #134db8; background: #eaf1ff; border-color: #a7c2ef; }
+.alert-entry { grid-template-columns: minmax(0, 1fr) auto; }
+.alert-entry input { min-width: 0; }
 .price-headings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; color: var(--muted); font-size: var(--text-small); font-weight: 600; }
 .entry-stepper { display: grid; grid-template-columns: 42px minmax(0, 1fr) 42px; gap: 8px; }
 .entry-stepper button { padding-inline: 0; font-variant-numeric: tabular-nums; }

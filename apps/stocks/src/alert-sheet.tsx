@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { cents, type OrderKind } from './domain.ts';
 import { money } from './format.ts';
-import { openAlerts, requireAlerts, updateDevice, type AlertState, type DeviceAlerts, type PriceAlert } from './alerts.ts';
-import { bundledToken, missingTokenBoxMessage } from './backup.ts';
+import { updateDevice, type AlertState, type DeviceAlerts, type PriceAlert } from './alerts.ts';
+import type { AlertCloud } from './alert-cloud.ts';
 
 type Props = {
-  credential: string;
+  cloud: AlertCloud;
   symbol: string;
   name: string;
   close: () => void;
@@ -13,12 +13,12 @@ type Props = {
 
 const deviceKey = 'stocks:alert-device';
 
-export function AlertSheet({ credential, symbol, name, close }: Props) {
-  const [state, setState] = useState<AlertState>();
+export function AlertSheet({ cloud, symbol, name, close }: Props) {
+  const { state, error: loadError, loading, saving } = useSyncExternalStore(cloud.subscribe, cloud.snapshot);
   const [deviceId, setDeviceId] = useState(() => localStorage.getItem(deviceKey) ?? crypto.randomUUID());
   const [working, setWorking] = useState(false);
   const [error, setError] = useState('');
-  const [kind, setKind] = useState<OrderKind>();
+  const [kind, setKind] = useState<OrderKind>('buy');
   const [price, setPrice] = useState('');
   const [message, setMessage] = useState('');
   const [registration, setRegistration] = useState<ServiceWorkerRegistration>();
@@ -31,29 +31,16 @@ export function AlertSheet({ credential, symbol, name, close }: Props) {
     return () => { mounted = false; };
   }, []);
 
-  useEffect(() => {
-    let mounted = true;
-    if (!bundledToken || !credential.trim()) {
-      setError(!bundledToken ? missingTokenBoxMessage : '请先在同步配置中填写云端访问口令。');
-      return;
-    }
-    setWorking(true);
-    void openAlerts(credential).then(remote => remote.read()).then(({ data }) => {
-      if (mounted) setState(requireAlerts(data));
-    }).catch((reason: Error) => {
-      if (mounted) setError(reason.message);
-    }).finally(() => {
-      if (mounted) setWorking(false);
-    });
-    return () => { mounted = false; };
-  }, [credential]);
+  useEffect(() => { void cloud.refresh(); }, [cloud]);
 
-  async function run(action: () => Promise<AlertState>, success: string) {
+  const pending = working || saving;
+
+  async function run(action: () => Promise<void>, success: string) {
     setWorking(true);
     setError('');
     setMessage('');
     try {
-      setState(await action());
+      await action();
       setMessage(success);
       return true;
     } catch (reason) {
@@ -64,12 +51,8 @@ export function AlertSheet({ credential, symbol, name, close }: Props) {
     }
   }
 
-  async function change(action: (current: AlertState) => AlertState) {
-    return (await openAlerts(credential)).update(current => action(requireAlerts(current)));
-  }
-
   function editAlerts(edit: (alerts: PriceAlert[]) => PriceAlert[], needsSubscription = false) {
-    return change(current => updateDevice(current, deviceId, device => {
+    return cloud.update(current => updateDevice(current, deviceId, device => {
       if (needsSubscription && !device.subscription) throw Error('请先在此设备重新启用通知');
       return { ...device, alerts: edit(device.alerts) };
     }));
@@ -98,7 +81,7 @@ export function AlertSheet({ credential, symbol, name, close }: Props) {
       const { keys } = subscription.toJSON();
       if (!keys?.auth || !keys.p256dh) throw Error('无法读取本机推送订阅');
       const pushDevice = { endpoint: subscription.endpoint, keys: { auth: keys.auth, p256dh: keys.p256dh } };
-      return change(current => {
+      return cloud.update(current => {
         if (current.publicKey !== publicKey) throw Error('推送配置已更新，请关闭弹窗后重试');
         return updateDevice(current, id, device => ({ ...device, subscription: pushDevice }));
       });
@@ -106,21 +89,16 @@ export function AlertSheet({ credential, symbol, name, close }: Props) {
   }
 
   async function add() {
-    if (!kind) return;
-    await run(async () => {
+    const saved = await run(async () => {
       const alert: PriceAlert = { id: crypto.randomUUID(), symbol, name, kind, price: cents(price) };
       return editAlerts(alerts => [...alerts, alert], true);
-    }, '已保存价格提醒').then(saved => {
-      if (saved) {
-        setPrice('');
-        setKind(undefined);
-      }
-    });
+    }, '已保存价格提醒');
+    if (saved) setPrice('');
   }
 
   const device: DeviceAlerts | undefined = state?.devices[deviceId];
   const alerts = state && (device?.alerts ?? []).filter(alert => alert.symbol === symbol);
-  return <form onSubmit={event => { event.preventDefault(); if (!working) void add(); }}>
+  return <form onSubmit={event => { event.preventDefault(); if (device?.subscription && !pending) void add(); }}>
     <div className="section-title editor-heading">
       <h2 id="watch-editor-title">价格提醒</h2>
       <button type="button" onClick={close}>关闭</button>
@@ -131,34 +109,37 @@ export function AlertSheet({ credential, symbol, name, close }: Props) {
         {alerts.map(alert => <li key={alert.id}>
           <div><strong>{alert.kind === 'buy' ? '买入 ≤ ' : '卖出 ≥ '}{money(alert.price)}</strong>
             <span className="muted">{alert.triggeredAt ? '已触发' : '待触发'}</span></div>
-          {alert.triggeredAt && <button type="button" disabled={working}
+          {alert.triggeredAt && <button type="button" disabled={pending || !device?.subscription}
             onClick={() => {
               const id = crypto.randomUUID();
               void run(() => editAlerts(alerts => alerts.map(item => item.id === alert.id ? { ...item, id, triggeredAt: undefined } : item), true), '已重新启用提醒');
             }}>重新启用</button>}
-          <button type="button" disabled={working} aria-label={'移除 ' + (alert.kind === 'buy' ? '买入 ' : '卖出 ') + money(alert.price) + ' 提醒'}
+          <button type="button" disabled={pending} aria-label={'移除 ' + (alert.kind === 'buy' ? '买入 ' : '卖出 ') + money(alert.price) + ' 提醒'}
             onClick={() => void run(() => editAlerts(alerts => alerts.filter(item => item.id !== alert.id)), '已移除提醒')}>移除</button>
         </li>)}
       </ul> : <p className="muted">这只股票还没有价格提醒。</p>)}
-      {state && <div className="alert-device">
-        <p className="muted">{device?.subscription ? '此设备已启用通知。此处添加的提醒会发到此设备。' : '请在 iPhone 主屏幕打开账簿并启用通知。'}</p>
-        <button type="button" disabled={working} onClick={() => void enable()}>{device?.subscription ? '重新绑定此设备' : '在此设备启用通知'}</button>
+      {state && !device?.subscription && <div className="alert-device">
+        <p className="muted">请在 iPhone 主屏幕打开账簿并启用通知。</p>
+        <button type="button" disabled={pending} onClick={() => void enable()}>{pending ? '正在启用…' : '在此设备启用通知'}</button>
       </div>}
-      {kind && <label className="watch-input">{kind === 'buy' ? '买入' : '卖出'}提醒价格（元）
-        <input value={price} onChange={event => setPrice(event.target.value)} inputMode="decimal" required disabled={working} />
-      </label>}
-      {working && <p className="muted" role="status">正在处理…</p>}
-      {error && <p className="form-message" role="alert">{error}</p>}
-      {message && <p className="muted" role="status">{message}</p>}
+      {device?.subscription && <button type="button" className="link-button alert-rebind" disabled={pending}
+        onClick={() => void enable()}>重新绑定此设备</button>}
+      {!state && loading && <p className="muted" role="status">正在读取价格提醒…</p>}
+      {loadError && <p className="form-message" role="alert">{loadError}</p>}
+      {!device?.subscription && error && <p className="form-message" role="alert">{error}</p>}
     </div>
     {device?.subscription && <div className="editor-footer alert-actions">
-      {kind ? <>
-        <button type="button" disabled={working} onClick={() => { setKind(undefined); setPrice(''); }}>返回</button>
-        <button className="primary" disabled={working}>保存{kind === 'buy' ? '买入' : '卖出'}订阅</button>
-      </> : <>
-        <button type="button" disabled={working} onClick={() => setKind('buy')}>买入订阅</button>
-        <button type="button" disabled={working} onClick={() => setKind('sell')}>卖出订阅</button>
-      </>}
+      <div className="alert-directions" role="group" aria-label="提醒方向">
+        <button type="button" disabled={pending} aria-pressed={kind === 'buy'} onClick={() => setKind('buy')}>买入 ≤</button>
+        <button type="button" disabled={pending} aria-pressed={kind === 'sell'} onClick={() => setKind('sell')}>卖出 ≥</button>
+      </div>
+      <div className="alert-entry">
+        <input aria-label="提醒价格（元）" placeholder="提醒价格（元）" value={price}
+          onChange={event => { setPrice(event.target.value); setMessage(''); setError(''); }}
+          inputMode="decimal" required disabled={pending} />
+        <button className="primary" disabled={pending || !price.trim()}>{pending ? '保存中…' : '添加提醒'}</button>
+      </div>
+      {error ? <p className="form-message" role="alert">{error}</p> : message && <p className="muted" role="status">{message}</p>}
     </div>}
   </form>;
 }
