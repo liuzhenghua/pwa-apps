@@ -69,6 +69,7 @@ web_modules/
 .env
 .env.*
 !.env.example
+!/apps/stocks/.env.stock-alerts.example
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache

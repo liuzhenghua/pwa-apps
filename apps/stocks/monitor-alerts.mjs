@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { generateRequestDetails, generateVAPIDKeys, getVapidHeaders } from 'web-push';
 import { matchesAlert, openAlerts, requireAlerts } from './src/alerts.ts';
+import { decrypt, encrypt } from './src/backup.ts';
 import { money } from './src/format.ts';
 import { fetchQuotes } from './src/quotes.ts';
 
@@ -13,6 +14,7 @@ function required(key) {
   if (!process.env[key]?.trim()) throw Error('请配置 ' + key);
   return process.env[key];
 }
+
 
 function marketTime(time) {
   const china = new Date(time + 8 * 60 * minute);
@@ -32,48 +34,39 @@ function validEndpoint(endpoint) {
 
 async function main() {
   const command = process.argv[2];
-  if (command === '--keygen') {
-    const keys = generateVAPIDKeys();
-    console.log('STOCK_ALERTS_PUBLIC_KEY=' + keys.publicKey);
-    console.log('STOCK_ALERTS_PRIVATE_KEY=' + keys.privateKey);
-    return;
-  }
   if (command && !['--init', '--test'].includes(command)) throw Error('未知选项 ' + command);
 
-  if (existsSync('.env.stock-alerts')) process.loadEnvFile('.env.stock-alerts');
-  const config = {
-    folder: required('STOCK_ALERTS_FOLDER'),
-    credential: required('STOCK_ALERTS_GITHUB_TOKEN'),
-    secret: required('STOCK_ALERTS_DATA_SECRET'),
-  };
-  const vapidDetails = {
-    subject: required('STOCK_ALERTS_SUBJECT'),
-    publicKey: required('STOCK_ALERTS_PUBLIC_KEY'),
-    privateKey: required('STOCK_ALERTS_PRIVATE_KEY'),
-  };
-  const ecdh = createECDH('prime256v1');
-  ecdh.setPrivateKey(Buffer.from(vapidDetails.privateKey, 'base64url'));
-  if (ecdh.getPublicKey().toString('base64url') !== vapidDetails.publicKey) {
-    throw Error('VAPID 公钥和私钥不匹配');
-  }
+  const configFile = new URL('./.env.stock-alerts', import.meta.url);
+  if (existsSync(configFile)) process.loadEnvFile(configFile);
+  const credential = required('STOCK_ALERTS_GITHUB_TOKEN').trim();
+  const secret = required('STOCK_ALERTS_KEY_SECRET');
+  const subject = required('STOCK_ALERTS_SUBJECT');
   const closedDates = new Set((process.env.STOCK_ALERTS_CLOSED_DATES ?? '').split(',').map(date => date.trim()).filter(Boolean));
   for (const date of closedDates) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) ||
         new Date(date).toISOString().slice(0, 10) !== date) throw Error('休市日期格式应为 YYYY-MM-DD');
   }
 
-  const remote = await openAlerts(config);
-  function checkedState(data) {
-    const state = requireAlerts(data);
-    if (state.publicKey !== vapidDetails.publicKey) throw Error('本机 VAPID 公钥与 GitHub 中的配置不匹配');
-    return state;
+  const remote = await openAlerts(credential);
+  let { data } = await remote.read();
+  if (command === '--init' && !data) {
+    const { publicKey, privateKey } = generateVAPIDKeys();
+    const privateKeyBox = await encrypt(privateKey, secret);
+    data = await remote.update(current => current ?? { version: 2, publicKey, privateKeyBox, devices: {} });
   }
-
+  const initial = requireAlerts(data);
+  const { publicKey } = initial;
+  let privateKey;
+  try {
+    privateKey = await decrypt(initial.privateKeyBox, secret);
+    const ecdh = createECDH('prime256v1');
+    ecdh.setPrivateKey(Buffer.from(privateKey, 'base64url'));
+    if (ecdh.getPublicKey().toString('base64url') !== publicKey) throw Error('密钥不匹配');
+  } catch {
+    throw Error('无法解锁 GitHub 中的推送私钥，请检查 STOCK_ALERTS_KEY_SECRET 和家庭提醒配置');
+  }
   if (command === '--init') {
-    await remote.update(current => current ? checkedState(current) : {
-      version: 1, publicKey: vapidDetails.publicKey, alerts: [],
-    });
-    console.log('价格提醒 GitHub 配置已就绪');
+    console.log('家庭价格提醒已初始化，推送密钥保存在 GitHub');
     return;
   }
 
@@ -84,7 +77,7 @@ async function main() {
     let token = authorization.get(origin);
     if (!token || token.refreshAt <= Date.now()) {
       token = {
-        headers: getVapidHeaders(origin, vapidDetails.subject, vapidDetails.publicKey, vapidDetails.privateKey, 'aes128gcm'),
+        headers: getVapidHeaders(origin, subject, publicKey, privateKey, 'aes128gcm'),
         refreshAt: Date.now() + 60 * minute,
       };
       authorization.set(origin, token);
@@ -100,42 +93,68 @@ async function main() {
     }
   }
 
-  const { data } = await remote.read();
-  const initial = checkedState(data);
   if (command === '--test') {
-    if (!initial.device) throw Error('请先在 iPhone 主屏幕上的股票账簿启用通知');
-    await send(initial.device, { title: '股票账簿', body: '价格提醒测试通知', tag: 'stock-alert-test' });
-    console.log('推送服务已接受测试通知，请在接收设备上检查');
+    const devices = Object.values(initial.devices).flatMap(device => device.subscription ? [device.subscription] : []);
+    if (!devices.length) throw Error('请先在 iPhone 主屏幕上的股票账簿启用通知');
+    let accepted = 0;
+    for (const device of devices) {
+      try {
+        await send(device, { title: '股票账簿', body: '价格提醒测试通知', tag: 'stock-alert-test' });
+        accepted++;
+      } catch (error) {
+        console.error(error.statusCode ? '推送服务返回 HTTP ' + error.statusCode : '一台设备的测试通知发送失败');
+      }
+    }
+    console.log('推送服务已接受 ' + accepted + '/' + devices.length + ' 台设备的测试通知');
+    if (accepted !== devices.length) process.exitCode = 1;
     return;
   }
 
+  function checkedState(current) {
+    const state = requireAlerts(current);
+    if (state.publicKey !== publicKey) throw Error('家庭推送密钥已更新，请重启盯盘程序');
+    return state;
+  }
+
   const delivered = new Map();
-  async function saveDeliveries() {
-    if (!delivered.size) return;
+  const expired = new Map();
+  async function saveResults(remote) {
+    if (!delivered.size && !expired.size) return;
     await remote.update(current => {
       const state = checkedState(current);
-      const alerts = state.alerts.map(alert => delivered.has(alert.id) && !alert.triggeredAt
-        ? { ...alert, triggeredAt: delivered.get(alert.id) } : alert);
-      return alerts.some((alert, index) => alert !== state.alerts[index]) ? { ...state, alerts } : state;
+      let changed = false;
+      const devices = Object.fromEntries(Object.entries(state.devices).map(([id, device]) => {
+        const alerts = device.alerts.map(alert => delivered.has(alert.id) && !alert.triggeredAt
+          ? { ...alert, triggeredAt: delivered.get(alert.id) } : alert);
+        const stale = expired.has(id) && expired.get(id) === device.subscription?.endpoint;
+        if (!stale && !alerts.some((alert, index) => alert !== device.alerts[index])) return [id, device];
+        changed = true;
+        return [id, { ...device, alerts, subscription: stale ? undefined : device.subscription }];
+      }));
+      return changed ? { ...state, devices } : state;
     });
     delivered.clear();
+    expired.clear();
   }
 
   async function poll() {
-    await saveDeliveries();
     const now = Date.now();
     const { date, session } = marketTime(now);
-    if (!session || closedDates.has(date)) return;
+    const trading = session && !closedDates.has(date);
+    if (!trading && !delivered.size && !expired.size) return;
+    const remote = await openAlerts(credential);
+    await saveResults(remote);
+    if (!trading) return;
     const state = checkedState((await remote.read()).data);
-    const device = state.device;
-    if (!device) return;
-    const pending = state.alerts.filter(alert => !alert.triggeredAt);
+    const pending = Object.entries(state.devices).flatMap(([id, device]) => device.subscription
+      ? device.alerts.filter(alert => !alert.triggeredAt).map(alert => ({ id, alert, device: device.subscription }))
+      : []);
     if (!pending.length) return;
-    const quotes = await fetchQuotes([...new Set(pending.map(alert => alert.symbol))], AbortSignal.timeout(10_000));
+    const quotes = await fetchQuotes([...new Set(pending.map(({ alert }) => alert.symbol))], AbortSignal.timeout(10_000));
 
-    for (const alert of pending) {
+    for (const { id, alert, device } of pending) {
       const quote = quotes.get(alert.symbol);
-      if (!quote || !matchesAlert(alert, quote.price)) continue;
+      if (expired.has(id) || !quote || !matchesAlert(alert, quote.price)) continue;
       const time = Date.parse(quote.time);
       const quoted = marketTime(time);
       if (quoted.date !== date || quoted.session !== session || now - time > maxQuoteAge || time > Date.now() + 15_000) continue;
@@ -151,20 +170,17 @@ async function main() {
         console.log('已发送提醒 ' + alert.symbol + ' ' + direction);
       } catch (error) {
         if ([404, 410].includes(error.statusCode)) {
-          await remote.update(current => {
-            const latest = checkedState(current);
-            return latest.device?.endpoint === device.endpoint ? { ...latest, device: undefined } : latest;
-          });
-          console.error('接收设备的推送订阅已失效，请在 iPhone 上重新启用通知');
-          break;
+          expired.set(id, device.endpoint);
+          console.error('一台设备的订阅已失效，请在对应 iPhone 上重新启用通知');
+        } else {
+          console.error('提醒发送失败，将在仍满足阈值时重试' + (error.statusCode ? '（HTTP ' + error.statusCode + '）' : ''));
         }
-        console.error('提醒发送失败，将在仍满足阈值时重试' + (error.statusCode ? '（HTTP ' + error.statusCode + '）' : ''));
       }
     }
-    await saveDeliveries();
+    await saveResults(remote);
   }
 
-  console.log('股票价格提醒已启动，按北京时间每分钟检查交易时段。按 Ctrl+C 停止。');
+  console.log('家庭股票提醒已启动，按北京时间每分钟检查交易时段。按 Ctrl+C 停止。');
   while (true) {
     try {
       await poll();
@@ -175,7 +191,7 @@ async function main() {
   }
 }
 
-main().catch(error => {
+await main().catch(error => {
   console.error(error.statusCode ? '推送服务返回 HTTP ' + error.statusCode : error.message);
   process.exitCode = 1;
 });

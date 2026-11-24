@@ -12,7 +12,7 @@ const api = 'https://api.github.com/repos/' + repository;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-type Encrypted = { format: 'stocks-encrypted-v1'; salt: string; iv: string; ciphertext: string };
+export type Encrypted = { format: 'stocks-encrypted-v1'; salt: string; iv: string; ciphertext: string };
 function encode(bytes: Uint8Array) {
   let binary = '';
   for (let index = 0; index < bytes.length; index += 8192) binary += String.fromCharCode(...bytes.subarray(index, index + 8192));
@@ -28,14 +28,14 @@ async function key(secret: string, salt: Uint8Array<ArrayBuffer>) {
   );
 }
 
-async function encrypt(data: unknown, secret: string): Promise<Encrypted> {
+export async function encrypt(data: unknown, secret: string): Promise<Encrypted> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await key(secret, salt), encoder.encode(JSON.stringify(data)));
   return { format: 'stocks-encrypted-v1', salt: encode(salt), iv: encode(iv), ciphertext: encode(new Uint8Array(ciphertext)) };
 }
 
-async function decrypt(raw: Encrypted, secret: string): Promise<unknown> {
+export async function decrypt(raw: Encrypted, secret: string): Promise<unknown> {
   if (raw?.format !== 'stocks-encrypted-v1') throw Error('云端备份格式无法识别');
   try {
     const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: decode(raw.iv) }, await key(secret, decode(raw.salt)), decode(raw.ciphertext));
@@ -49,11 +49,19 @@ export type SyncDirection = 'auto' | 'upload' | 'download';
 
 export class SyncConflict extends Error {}
 
-export async function githubArchive(folderInput: string, credential: string, secret: string) {
+async function githubArchive(folderInput: string, credential: string, secret: string) {
   const folder = folderInput.trim();
   if (!folderPattern.test(folder)) throw Error('云端名字需使用 1–60 位字母、数字、下划线或连字符');
-  if (!credential.trim() || !secret) throw Error('请填写云端访问凭据和数据加密口令');
-  const directory = 'stocks/' + folder + '/';
+  if (!secret) throw Error('请填写云端访问凭据和数据加密口令');
+  return { ...await githubFiles('stocks/' + folder + '/', credential, secret), folder };
+}
+
+export function githubAlertFiles(credential: string) {
+  return githubFiles('stock-alerts/', credential);
+}
+
+async function githubFiles(directory: string, credential: string, secret?: string) {
+  if (!credential.trim()) throw Error('请填写云端访问凭据');
   const token = bundledToken ? await unlockTokenBox(bundledToken, credential) : credential.trim();
   const headers = { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + token, 'X-GitHub-Api-Version': '2022-11-28' };
   const repo = await fetch(api, { headers, cache: 'no-store' });
@@ -83,7 +91,8 @@ export async function githubArchive(folderInput: string, credential: string, sec
     if (typeof payload.sha !== 'string' || typeof payload.content !== 'string' || !payload.content.trim()) {
       throw Error('云端文件内容无法读取，可能超出单文件大小限制');
     }
-    return { sha: payload.sha as string, data: await decrypt(JSON.parse(decoder.decode(decode(payload.content))), secret) };
+    const serialized = JSON.parse(decoder.decode(decode(payload.content)));
+    return { sha: payload.sha as string, data: secret ? await decrypt(serialized, secret) : serialized };
   }
 
   async function gitWrite(path: string, method: 'POST' | 'PATCH', data: unknown) {
@@ -106,26 +115,25 @@ export async function githubArchive(folderInput: string, credential: string, sec
     for (const [file, data] of changes) {
       let sha: string | null = null;
       if (data !== null) {
-        const serialized = encoder.encode(JSON.stringify(data));
-        // AES-GCM adds a 16-byte tag before the ciphertext is encoded in Base64.
-        if (Math.ceil((serialized.length + 16) / 3) * 4 + 256 > 950_000) {
+        const serialized = encoder.encode(JSON.stringify(secret ? await encrypt(data, secret) : data));
+        if (serialized.length > 950_000) {
           throw Error('「' + file + '」将超过 950 KB，已保留原云端备份');
         }
-        const content = encode(encoder.encode(JSON.stringify(await encrypt(data, secret))));
+        const content = encode(serialized);
         sha = (await gitWrite('blobs', 'POST', { content, encoding: 'base64' })).sha;
         if (typeof sha !== 'string' || !sha) throw Error('云端文件版本无效');
       }
       if (file === 'open.json') indexSha = sha ?? '';
       tree.push({ path: directory + file, mode: '100644', type: 'blob', sha });
     }
-    const message = changes.has('alerts.json') ? 'Sync encrypted stock alerts' : 'Sync encrypted stock ledger';
+    const message = secret ? 'Sync encrypted stock ledger' : 'Sync household stock alerts';
     const nextTree = await gitWrite('trees', 'POST', { base_tree: base.tree.sha, tree });
     const commit = await gitWrite('commits', 'POST', { message, tree: nextTree.sha, parents: [parent] });
     await gitWrite('refs/' + branch, 'PATCH', { sha: commit.sha, force: false });
     return { sha: indexSha, commit: commit.sha as string };
   }
 
-  return { folder, head, read, publish };
+  return { head, read, publish };
 }
 
 async function digest(data: unknown): Promise<string> {

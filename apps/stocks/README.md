@@ -68,28 +68,21 @@ npm run build
 
 ### 第一次在公司电脑上配置
 
-1. 安装 Node.js 22.13 或更新版本，检出包含本功能的代码。在仓库根目录运行 `npm ci`。
-2. 运行 `npm run stocks:alerts -- --keygen` 生成一对 Web Push VAPID 密钥。直接保留这对密钥，之后启动和换机继续使用同一对。
-3. 在仓库根目录创建 `.env.stock-alerts`，填入以下配置。该文件已被 Git 忽略。GitHub Token 需要对私有数据仓库 `liuzhenghua/pwa-apps-data` 有 Contents 读写权限。此处填写实际 Token。手机上的「云端访问口令」继续按账簿原有方式配置。
+1. 安装 Node.js 22.13 或更新版本。在包含本功能的仓库根目录运行 `npm ci`。
+2. 将股票账簿模块里的配置模板复制为 `apps/stocks/.env.stock-alerts`，再填写 GitHub Token 和盯盘口令。实际配置文件已被 Git 忽略。下面的命令从仓库根目录运行。
 
-   ```dotenv
-   STOCK_ALERTS_FOLDER=your-cloud-name
-   STOCK_ALERTS_GITHUB_TOKEN=your-github-token
-   STOCK_ALERTS_DATA_SECRET="your-ledger-encryption-passphrase"
-   STOCK_ALERTS_SUBJECT=mailto:you@example.com
-   STOCK_ALERTS_PUBLIC_KEY=generated-public-key
-   STOCK_ALERTS_PRIVATE_KEY=generated-private-key
-   STOCK_ALERTS_CLOSED_DATES=
+   ```sh
+   cp apps/stocks/.env.stock-alerts.example apps/stocks/.env.stock-alerts
    ```
 
-   `STOCK_ALERTS_FOLDER` 和 `STOCK_ALERTS_DATA_SECRET` 分别使用 iPhone 账簿设置里的云端名字和数据加密口令。`STOCK_ALERTS_SUBJECT` 使用你自己的联系邮箱，保留 `mailto:` 前缀。`STOCK_ALERTS_CLOSED_DATES` 可填沪深交易所公告的工作日休市日期，用逗号分隔，格式为 `YYYY-MM-DD`。每年更新这项配置并重启盯盘程序。周末自动跳过。未列入的节假日可能仍会查询，但过期行情不会触发提醒。将配置和私钥保存在公司电脑的受限目录内。
-4. 运行 `npm run stocks:alerts -- --init`。初始化会在同一云端名字下创建加密的 `stocks/<云端名字>/alerts.json`。重复执行可检查现有配置。
+   `STOCK_ALERTS_GITHUB_TOKEN` 需要对私有数据仓库 `liuzhenghua/pwa-apps-data` 有 Contents 读写权限。`STOCK_ALERTS_KEY_SECRET` 使用密码管理器单独生成并保存一条强随机口令，用于保护 GitHub 里的推送私钥。`STOCK_ALERTS_SUBJECT` 是推送请求的 VAPID 联系方式，模板已填好邮箱并保留 `mailto:` 前缀。价格提醒仍通过 iPhone 系统通知送达。`STOCK_ALERTS_CLOSED_DATES` 可填沪深交易所公告的工作日休市日期，用逗号分隔，格式为 `YYYY-MM-DD`。更新休市配置后重启程序。周末自动跳过。未列入的节假日可能仍会查询，过期行情不会触发提醒。
+3. 运行 `npm run stocks:alerts -- --init`。程序首次初始化会自动生成 Web Push 密钥对，把公钥和加密后的私钥写入 GitHub 的 `stock-alerts/alerts.json`。重复运行会核验已有配置并保留原密钥。
 
-### 在 iPhone 上绑定并测试
+### 家人在 iPhone 上绑定并测试
 
-1. 通过项目的 GitHub Pages 发布包含本功能的版本。在 iOS 16.4 或更新版本用 Safari 打开 HTTPS 版股票账簿，选择「添加到主屏幕」，然后从主屏幕打开。普通 Vite 开发页面用于预览界面。
-2. 在「设置 → 同步配置」填好相同的云端名字和数据加密口令。打开持仓卡的铃铛，点「在此设备启用通知」，允许系统通知。每个云端名字使用一台接收设备。在新设备启用会替换现有绑定。
-3. 回到公司电脑运行 `npm run stocks:alerts -- --test`。这条命令不受交易时段限制。锁屏后收到「价格提醒测试通知」即可验证实际送达。终端的成功消息表示推送服务已接收请求。如果手机没收到，检查主屏幕安装、系统通知设置、专注模式和公司网络能否访问 Apple 推送服务。
+1. 通过项目的 GitHub Pages 发布包含本功能的版本。在 iOS 16.4 或更新版本用 Safari 打开 HTTPS 版股票账簿，选择「添加到主屏幕」，再从主屏幕打开。
+2. 在「设置 → 同步配置」填写云端访问口令。打开持仓卡的铃铛，点「在此设备启用通知」，允许系统通知，然后添加价位。每台设备管理自己的提醒，即便使用同一个账簿云端名字。iPhone 通过 GitHub 登记，公司电脑无需开放端口。
+3. 在公司电脑运行 `npm run stocks:alerts -- --test`，给当前所有已绑定设备发送测试通知。这条命令不受交易时段限制。终端会显示推送服务接受了几台设备的请求。可锁屏检查实际到达情况。
 
 ### 启动日常盯盘
 
@@ -99,6 +92,6 @@ npm run build
 npm run stocks:alerts
 ```
 
-程序按北京时间在工作日的 09:30–11:30 和 13:00–15:00 每分钟批量查询一次已订阅股票。它使用腾讯财经行情，跳过不在当日当前交易时段或超过两分钟的报价。每分钟轮询可能错过分钟内的短暂触价。公司网络需能访问 `api.github.com`、`qt.gtimg.cn` 和 iPhone 的 `*.push.apple.com`。按 `Ctrl+C` 停止。换电脑时复制原配置和密钥，完成依赖安装后启动，并关闭旧电脑上的进程。每个云端名字只运行一个盯盘进程。
+程序按北京时间在工作日的 09:30–11:30 和 13:00–15:00 每分钟批量查询一次已订阅股票。它使用腾讯财经行情，跳过不在当日当前交易时段或超过两分钟的报价。每分钟轮询可能错过分钟内的短暂触价。公司网络需能访问 `api.github.com`、`qt.gtimg.cn` 和 iPhone 的 `*.push.apple.com`。按 `Ctrl+C` 停止。换电脑时关闭旧进程，在新电脑安装依赖并配置 GitHub Token、同一个 `STOCK_ALERTS_KEY_SECRET` 和联系邮箱，再运行日常启动命令。程序会从 GitHub 取回原推送密钥，家人的 iPhone 无需重新绑定。全家只需运行一个盯盘进程。
 
-通知服务接受请求后，程序会把提醒标记为「已触发」。若在发送成功和写回 GitHub 之间进程退出，同一条提醒在重启后可能再次发送。提醒规则和设备绑定保存在独立的 GitHub 加密文件，账簿 JSON 导出仍只包含账簿数据。
+通知服务接受请求后，程序会把提醒标记为「已触发」。若在发送成功和写回 GitHub 之间进程退出，同一条提醒在重启后可能再次发送。提醒规则和设备绑定以明文存放在 GitHub 私有仓库，同仓库的读写权限也适用于这些数据。推送私钥单独加密，已有账簿及备份仍使用各自的数据加密口令。旧单用户版本的提醒如已登记，请在家庭版重新添加。

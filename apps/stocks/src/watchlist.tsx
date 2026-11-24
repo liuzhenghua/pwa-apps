@@ -461,7 +461,7 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
         pressedBackdrop.current = false;
         if (!addMode && !busy && tappedBackdrop) event.currentTarget.close();
       }}>
-      {editor?.type === 'alerts' ? <AlertSheet config={syncConfig} symbol={symbolFor(editor.stock)}
+      {editor?.type === 'alerts' ? <AlertSheet credential={syncConfig.credential} symbol={symbolFor(editor.stock)}
         name={editorQuote?.name ?? editor.stock.name} close={() => dialog.current?.close()} />
         : editor && <form onSubmit={event => void submit(event)}>
         <div className="section-title editor-heading">

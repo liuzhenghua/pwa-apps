@@ -1,4 +1,4 @@
-import { githubArchive, SyncConflict } from './backup.ts';
+import { githubAlertFiles, SyncConflict, type Encrypted } from './backup.ts';
 import type { OrderKind } from './domain.ts';
 
 export type PriceAlert = {
@@ -10,15 +10,17 @@ export type PriceAlert = {
   triggeredAt?: string;
 };
 export type PushDevice = { endpoint: string; keys: { p256dh: string; auth: string } };
-export type AlertState = { version: 1; publicKey: string; device?: PushDevice; alerts: PriceAlert[] };
+export type DeviceAlerts = { subscription?: PushDevice; alerts: PriceAlert[] };
+export type AlertState = { version: 2; publicKey: string; privateKeyBox: Encrypted; devices: Record<string, DeviceAlerts> };
 const file = 'alerts.json';
 
-export async function openAlerts(config: { folder: string; credential: string; secret: string }) {
-  const archive = await githubArchive(config.folder, config.credential, config.secret);
+export async function openAlerts(credential: string) {
+  const archive = await githubAlertFiles(credential);
   async function read() {
     const head = await archive.head();
     const data = (await archive.read(file, head))?.data as AlertState | undefined;
-    if (data && (data.version !== 1 || !data.publicKey || !Array.isArray(data.alerts))) {
+    if (data && (data.version !== 2 || !data.publicKey || !data.privateKeyBox || !data.devices ||
+      Array.isArray(data.devices) || Object.values(data.devices).some(device => !Array.isArray(device?.alerts)))) {
       throw Error('无法识别云端提醒配置');
     }
     return { head, data };
@@ -43,8 +45,12 @@ export async function openAlerts(config: { folder: string; credential: string; s
 }
 
 export function requireAlerts(state: AlertState | undefined): AlertState {
-  if (!state) throw Error('请先在盯盘电脑上初始化价格提醒');
+  if (!state) throw Error('家庭价格提醒尚未初始化。请在盯盘电脑上按 README 运行 npm run stocks:alerts -- --init');
   return state;
+}
+
+export function updateDevice(state: AlertState, id: string, change: (device: DeviceAlerts) => DeviceAlerts): AlertState {
+  return { ...state, devices: { ...state.devices, [id]: change(state.devices[id] ?? { alerts: [] }) } };
 }
 
 export function matchesAlert(alert: PriceAlert, price: number): boolean {
