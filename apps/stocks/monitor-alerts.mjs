@@ -9,6 +9,7 @@ import { fetchQuotes } from './src/quotes.ts';
 
 const minute = 60_000;
 const maxQuoteAge = 2 * minute;
+const ruleRefreshInterval = 30 * minute;
 
 function required(key) {
   if (!process.env[key]?.trim()) throw Error('请配置 ' + key);
@@ -66,7 +67,8 @@ async function main() {
     throw Error('无法解锁 GitHub 中的推送私钥，请检查 STOCK_ALERTS_KEY_SECRET 和家庭提醒配置');
   }
   if (command === '--init') {
-    console.log('家庭价格提醒已初始化，推送密钥保存在 GitHub');
+    await remote.update(requireAlerts);
+    console.log('价格提醒已初始化，推送密钥保存在 GitHub');
     return;
   }
 
@@ -118,14 +120,17 @@ async function main() {
     return state;
   }
 
+  let cachedRules = initial;
+  let rulesReadAt = Date.now();
   const delivered = new Map();
   const expired = new Map();
   const sharedDelivered = new Map();
   const sharedExpired = new Map();
   const hasResults = () => delivered.size || expired.size || sharedDelivered.size || sharedExpired.size;
-  async function saveResults(remote) {
+  async function saveResults() {
     if (!hasResults()) return;
-    await remote.update(current => {
+    const accounts = [...new Set([...sharedDelivered.keys(), ...sharedExpired.keys()].map(key => JSON.parse(key)[0]))];
+    const updated = await remote.update(current => {
       const state = checkedState(current);
       let changed = false;
       const devices = Object.fromEntries(Object.entries(state.devices).map(([id, device]) => {
@@ -137,7 +142,10 @@ async function main() {
         return [id, { ...device, alerts, subscription: stale ? undefined : device.subscription }];
       }));
       return applySharedAlertResults(changed ? { ...state, devices } : state, sharedDelivered, sharedExpired);
-    });
+    }, accounts);
+    const cachedAccounts = { ...cachedRules.accounts };
+    for (const name of accounts) delete cachedAccounts[name];
+    cachedRules = { ...updated, accounts: { ...cachedAccounts, ...updated.accounts } };
     delivered.clear();
     expired.clear();
     sharedDelivered.clear();
@@ -149,10 +157,13 @@ async function main() {
     const { date, session } = marketTime(now);
     const trading = session && !closedDates.has(date);
     if (!trading && !hasResults()) return;
-    const remote = await openAlerts(credential);
-    await saveResults(remote);
+    await saveResults();
     if (!trading) return;
-    const state = checkedState((await remote.read()).data);
+    if (now - rulesReadAt >= ruleRefreshInterval) {
+      cachedRules = checkedState((await remote.read()).data);
+      rulesReadAt = Date.now();
+    }
+    const state = cachedRules;
     const legacy = Object.entries(state.devices).flatMap(([id, device]) => device.subscription
       ? device.alerts.filter(alert => !alert.triggeredAt).map(alert => ({ id, alert, device: device.subscription }))
       : []);
@@ -188,10 +199,10 @@ async function main() {
         }
       }
     }
-    await saveResults(remote);
+    await saveResults();
   }
 
-  console.log('家庭股票提醒已启动，按北京时间每分钟检查交易时段。按 Ctrl+C 停止。');
+  console.log('家庭股票提醒已启动，每分钟检查行情，每 30 分钟刷新提醒规则。按 Ctrl+C 停止。');
   while (true) {
     try {
       await poll();

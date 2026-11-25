@@ -95,6 +95,15 @@ async function githubFiles(directory: string, credential: string, secret?: strin
     return { sha: payload.sha as string, data: secret ? await decrypt(serialized, secret) : serialized };
   }
 
+  async function list(folder: string, commit: string): Promise<string[]> {
+    const response = await fetch(api + '/contents/' + directory + folder + '?ref=' + encodeURIComponent(commit), { headers, cache: 'no-store' });
+    if (response.status === 404) return [];
+    if (!response.ok) throw Error('无法列出云端提醒文件（' + response.status + '）');
+    const entries = await response.json();
+    if (!Array.isArray(entries) || entries.length >= 1000) throw Error('提醒目录无法完整列出');
+    return entries.filter(entry => entry.type === 'file').map(entry => entry.name);
+  }
+
   async function gitWrite(path: string, method: 'POST' | 'PATCH', data: unknown) {
     const result = await fetch(api + '/git/' + path, {
       method, headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(data),
@@ -133,7 +142,7 @@ async function githubFiles(directory: string, credential: string, secret?: strin
     return { sha: indexSha, commit: commit.sha as string };
   }
 
-  return { head, read, publish };
+  return { head, read, list, publish };
 }
 
 async function digest(data: unknown): Promise<string> {

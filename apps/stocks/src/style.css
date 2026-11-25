@@ -318,6 +318,7 @@ td small { margin-top: 2px; }
 .decision-impact { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; padding: 3px 7px; background: #edf2fa; border-radius: 5px; font-size: var(--text-small); }
 .decision-impact > span { color: var(--muted); }
 .decision-impact strong { font-weight: 600; font-variant-numeric: tabular-nums; }
+.recent-trade-impacts > .decision-impact:only-child { grid-column: 1 / -1; }
 .decision-comparison { font-size: var(--text-small); }
 .decision-overview button { min-width: 0; }
 .decision-current, .cycle-position p { margin: 8px 0 0; }
@@ -327,7 +328,9 @@ td small { margin-top: 2px; }
 .decision-overview ul { list-style: none; padding: 0; margin: 7px 0 0; }
 .decision-overview li + li { border-top: 1px solid var(--line); }
 .decision-overview button { width: 100%; justify-content: space-between; border: 0; padding: 9px 4px; text-align: left; font-weight: 500; }
-.decision-overview-copy { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.decision-overview-copy { flex: 1; display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.decision-overview-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 8px; }
+.decision-overview-quote { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; font-size: var(--text-small); font-weight: 600; font-variant-numeric: tabular-nums; }
 .decision-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; overflow-wrap: anywhere; }
 .decision-quantity { color: var(--muted); font-size: var(--text-small); font-variant-numeric: tabular-nums; }
 .decision-label { border-radius: 5px; padding: 2px 6px; background: #e9eff8; font-size: var(--text-small); font-weight: 600; }
@@ -347,7 +350,7 @@ td small { margin-top: 2px; }
   .decision-overview ul { margin-top: 4px; }
   .decision-overview button { gap: 4px; padding: 8px 0; }
   .decision-overview button svg { width: 13px; }
-  .decision-overview-copy { flex: 1; gap: 5px; }
+  .decision-overview-copy { gap: 5px; }
   .decision-title { gap: 2px 6px; }
   .decision-title .decision-label { padding-inline: 4px; }
   .decision-title strong:not(:first-child) { font-size: var(--text-small); }
@@ -406,7 +409,6 @@ td small { margin-top: 2px; }
 .rule-save-status:empty { display: none; }
 .rule-save-status { margin-right: auto; color: #087451; font-size: var(--text-small); }
 
-.decision-impacts-single > .decision-impact { grid-column: 1 / -1; }
 
 .startup-sync-toast {
   position: fixed;

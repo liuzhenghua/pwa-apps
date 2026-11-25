@@ -24,7 +24,7 @@ export function createAlertCloud(credential: string, folder: string) {
   function connection() {
     if (!remote || Date.now() >= remoteExpires) {
       remoteExpires = Date.now() + freshFor;
-      remote = openAlerts(credential);
+      remote = openAlerts(credential, account);
     }
     return remote;
   }
@@ -55,13 +55,13 @@ export function createAlertCloud(credential: string, folder: string) {
       });
       return refresh;
     },
-    async update(change: (current: AlertState) => AlertState) {
+    async update(change: (current: AlertState) => AlertState, previousName?: string) {
       if (setupError) throw Error(setupError);
       if (snapshot.saving) throw Error('上一项修改正在保存，请稍后重试');
       publish({ saving: true, error: undefined });
       try {
         const store = await connection();
-        const state = await store.update(current => change(requireAlerts(current)));
+        const state = await store.update(current => change(requireAlerts(current)), previousName ? [previousName] : undefined);
         generation++;
         loadedAt = Date.now();
         publish({ state, error: undefined });

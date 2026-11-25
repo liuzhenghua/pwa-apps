@@ -45,10 +45,13 @@ test('encrypted yearly sync uses stable paths and publishes complete snapshots a
     if (url === api + '/git/ref/heads/main') return Response.json({ object: { sha: head } });
     if (url.startsWith(prefix) || url.startsWith(alertPrefix)) {
       const target = new URL(url);
-      const file = target.pathname.split('/').at(-1);
+      const file = target.href.slice(url.startsWith(alertPrefix) ? alertPrefix.length : prefix.length).split('?')[0];
       const commit = target.searchParams.get('ref');
       reads.push([file, commit]);
-      const payload = trees.get(commits.get(commit)?.tree)?.get(file);
+      const entries = trees.get(commits.get(commit)?.tree);
+      if (file === 'accounts') return Response.json([...entries.keys()].filter(path => path.startsWith('accounts/'))
+        .map(path => ({ name: path.slice('accounts/'.length), type: 'file' })));
+      const payload = entries?.get(file);
       return payload ? Response.json(payload) : missing();
     }
     if (url.startsWith(api + '/git/commits/')) {
@@ -60,9 +63,12 @@ test('encrypted yearly sync uses stable paths and publishes complete snapshots a
       assert.equal(options.method, 'POST');
       assert.equal(body.encoding, 'base64');
       const payload = JSON.parse(Buffer.from(body.content, 'base64').toString());
-      if (payload.version === 2) {
+      if (payload.privateKeyBox) {
         assert.equal(payload.privateKeyBox.format, 'stocks-encrypted-v1');
         assert.ok(!JSON.stringify(payload).includes('test-private-key'));
+      } else if (Array.isArray(payload.alerts)) {
+        assert.ok(payload.devices);
+        assert.equal('privateKeyBox' in payload, false);
       } else {
         assert.equal(payload.format, 'stocks-encrypted-v1');
         assert.ok(payload.ciphertext);
@@ -77,8 +83,8 @@ test('encrypted yearly sync uses stable paths and publishes complete snapshots a
       const next = new Map(trees.get(body.base_tree));
       for (const entry of body.tree) {
         assert.equal(entry.type, 'blob');
-        assert.ok(entry.path.startsWith('stocks/test-ledger/') || entry.path === 'stock-alerts/alerts.json');
-        const file = entry.path.split('/').at(-1);
+        assert.ok(entry.path.startsWith('stocks/test-ledger/') || entry.path.startsWith('stock-alerts/'));
+        const file = entry.path.startsWith('stock-alerts/') ? entry.path.slice('stock-alerts/'.length) : entry.path.split('/').at(-1);
         paths.push(file);
         if (entry.sha === null) next.delete(file);
         else next.set(file, blobs.get(entry.sha));
@@ -238,24 +244,51 @@ test('encrypted yearly sync uses stable paths and publishes complete snapshots a
   const first = { id: 'a', symbol: 'sh600000', name: stock.name, kind: 'buy', price: 2300 };
   const second = { ...first, id: 'b', kind: 'sell', price: 2400 };
   const privateKeyBox = await encrypt('test-private-key', 'family-monitor-secret');
-  await reminders.update(() => ({
+  const old = {
     version: 2, publicKey: 'test-public-key', privateKeyBox,
     devices: { firstPhone: { alerts: [first] } },
-  }));
+    accounts: { family: { alerts: [first], devices: {} }, another: { alerts: [first], devices: {} } },
+  };
+  externalUpdate('alerts.json', { sha: 'legacy', content: Buffer.from(JSON.stringify(old)).toString('base64') });
+  const family = await openAlerts('mock-token', 'family');
   let attempts = 0;
-  await reminders.update(state => {
+  await family.update(state => {
     // Simulate an unrelated ledger commit after reading the alerts snapshot.
     if (++attempts === 1) externalUpdate('open.json', localIndex);
     return updateAlertAccount(state, 'family', account => ({ ...account, alerts: [...account.alerts, second] }));
   });
   assert.equal(attempts, 2);
-  const familyState = (await reminders.read()).data;
+  assert.deepEqual(publications.at(-1), ['push.json', 'accounts/family.json', 'alerts.json']);
+  const accountReadStart = reads.length;
+  const familyState = (await family.read()).data;
+  assert.deepEqual(reads.slice(accountReadStart).map(([file]) => file).sort(),
+    ['accounts/family.json', 'alerts.json', 'push.json']);
   assert.deepEqual(familyState.devices.firstPhone.alerts, [first]);
-  assert.deepEqual(familyState.accounts.family.alerts, [second]);
+  assert.deepEqual(familyState.accounts.family.alerts, [first, second]);
+  assert.equal(familyState.accounts.another, undefined);
   assert.equal(await decrypt(familyState.privateKeyBox, 'family-monitor-secret'), 'test-private-key');
   await assert.rejects(decrypt(familyState.privateKeyBox, secret), /无法解密/);
+
+  await reminders.update(state => state);
+  assert.deepEqual(publications.at(-1), ['accounts/another.json', 'alerts.json']);
+  const monitorState = (await reminders.read()).data;
+  assert.deepEqual(monitorState.accounts.another.alerts, [first]);
+  const otherFile = files().get('accounts/another.json');
+  const pushFile = files().get('push.json');
+  await family.update(state => updateAlertAccount(state, 'family', account => ({ ...account, alerts: [second] })));
+  assert.deepEqual(publications.at(-1), ['accounts/family.json']);
+  assert.deepEqual(files().get('accounts/another.json'), otherFile);
+  assert.deepEqual(files().get('push.json'), pushFile);
   assert.deepEqual(files().get('open.json'), localIndex);
-  assert.deepEqual(publications.at(-1), ['alerts.json']);
+
+  const writebackReadStart = reads.length;
+  await reminders.update(state => updateAlertAccount(state, 'family', account => ({
+    ...account, alerts: account.alerts.map(alert => ({ ...alert, triggeredAt: stock.priceUpdatedAt })),
+  })), ['family']);
+  assert.deepEqual(reads.slice(writebackReadStart).map(([file]) => file).sort(),
+    ['accounts/family.json', 'alerts.json', 'push.json']);
+  assert.deepEqual(publications.at(-1), ['accounts/family.json']);
+  assert.deepEqual(files().get('accounts/another.json'), otherFile);
   assert.equal(matchesAlert(first, 2300), true);
   assert.equal(matchesAlert(first, 2301), false);
   assert.equal(matchesAlert(second, 2400), true);

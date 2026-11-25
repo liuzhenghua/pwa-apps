@@ -14,6 +14,7 @@ type Props = {
 };
 
 const deviceKey = 'stocks:alert-device';
+const bindingKey = 'stocks:alert-account';
 const installGuide = '在 iPhone 上，请先用 Safari 将股票账簿添加到主屏幕，再从主屏幕打开。';
 const permissionGuide = '通知权限已关闭，请在系统或浏览器设置中允许通知，然后返回重新启用。';
 const notificationRequired = new Error('此账号没有启用通知的设备。');
@@ -150,7 +151,8 @@ export function AlertManager({ cloud, stock, close, context }: Props) {
       await cloud.update(current => {
         if (current.publicKey !== publicKey) throw Error('推送配置已更新，请刷新后重试');
         return enrollAlertDevice(current, cloud.account, id, pushDevice);
-      });
+      }, localStorage.getItem(bindingKey) ?? undefined);
+      localStorage.setItem(bindingKey, cloud.account);
       setNotification({ endpoint: subscription.endpoint, denied: false });
       setConfirmSave(false);
     }, '已在此设备启用通知');

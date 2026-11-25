@@ -91,22 +91,28 @@ function latestTrade(history: TradePrice[], kind: OrderKind): PriceRecord | unde
     trade.kind === kind && (!previous || trade.time > previous.time) ? trade : previous, undefined);
 }
 
-function buyEstimate(quote?: Quote, reference?: PriceRecord, referenceLabel: '买入' | '卖出' = '买入') {
+function latestRecordedTrade(history: TradePrice[], kind: OrderKind, cached?: PriceRecord) {
+  const loaded = latestTrade(history, kind);
+  return loaded && (!cached || loaded.time >= cached.time) ? loaded : cached;
+}
+
+function priceEstimate(quote?: Quote, reference?: PriceRecord, kind: OrderKind = 'buy') {
   const quantity = reference?.quantity;
   if (!quote || !reference || quantity === undefined) return;
   const cost = quote.price * quantity;
-  const difference = (reference.price - quote.price) * quantity;
+  const buy = kind === 'buy';
+  const difference = (quote.price - reference.price) * quantity * (buy ? -1 : 1);
   if (!Number.isSafeInteger(cost) || !Number.isSafeInteger(difference)) return;
   const tone = difference > 0 ? 'gain' : difference < 0 ? 'loss' : '';
   const rate = Math.abs(percent(quote.price - reference.price, reference.price)).toFixed(2);
-  const impact = difference === 0 ? '与上次' + referenceLabel + '同价' :
-    (difference > 0 ? '省 ' : '贵 ') + money(Math.abs(difference));
+  const impact = difference === 0 ? '与上次' + (buy ? '买入' : '卖出') + '同价' :
+    (difference > 0 ? (buy ? '省 ' : '多 ') : (buy ? '贵 ' : '少 ')) + money(Math.abs(difference));
   const impactRate = difference === 0 ? '' : rate + '%';
-  return { quantity, cost, impact, impactRate, tone };
+  return { quantity, cost, impact, impactRate, tone, kind };
 }
 
-function BuyImpact({ estimate }: { estimate: NonNullable<ReturnType<typeof buyEstimate>> }) {
-  return <span className="decision-impact"><span>买 {number.format(estimate.quantity)} 股</span>
+function PriceImpact({ estimate }: { estimate: NonNullable<ReturnType<typeof priceEstimate>> }) {
+  return <span className="decision-impact"><span>{sideLabels[estimate.kind]} {number.format(estimate.quantity)} 股</span>
     <strong className={'decision-impact-values ' + estimate.tone}>
       <span>{estimate.impact}</span>
       {estimate.impactRate && <span><span aria-hidden="true">· </span>{estimate.impactRate}</span>}
@@ -130,7 +136,7 @@ function cycleDecision(history: TradePrice[], quote: Quote | undefined, lastSell
       belowSell && lastSell ? priceComparison('卖出', quote.price, lastSell) : '',
       belowBuy && latestBuy ? priceComparison('买入', quote.price, latestBuy) : '',
     ].filter(Boolean).join(' · ');
-    const estimate = buyEstimate(quote, latestBuy);
+    const estimate = priceEstimate(quote, latestBuy);
     const sellSignal = sellObservation(result, quote.price, rules);
     const partialSell = sellSignal?.scope === 'last-buy';
     const headline = sellSignal ? '卖出观察' : buyObservation ? '' : '观望';
@@ -165,7 +171,13 @@ function DecisionImpacts({ decision }: { decision: NonNullable<ReturnType<typeof
   return <span className="decision-impacts">
     {sellImpact && <span className="decision-impact"><span>全卖预计</span><strong className={'decision-impact-values ' + tone}><span>{sellImpact}</span>
       {sellImpactRate && <span><span aria-hidden="true">· </span>{sellImpactRate}</span>}</strong></span>}
-    {estimate && <BuyImpact estimate={estimate} />}
+    {estimate && <PriceImpact estimate={estimate} />}
+  </span>;
+}
+
+function RecentTradeImpacts({ estimates }: { estimates: NonNullable<ReturnType<typeof priceEstimate>>[] }) {
+  return <span className="decision-impacts recent-trade-impacts">
+    {estimates.map(estimate => <PriceImpact key={estimate.kind} estimate={estimate} />)}
   </span>;
 }
 
@@ -330,28 +342,29 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
   const cards = ledger.stocks.map(stock => {
     const symbol = symbolFor(stock);
     const quote = quotes.get(symbol);
+    const dayChange = quote?.previousClose ? quote.price - quote.previousClose : undefined;
+    const dayRate = quote?.previousClose && dayChange !== undefined ? percent(dayChange, quote.previousClose) : undefined;
+    const dayTone = dayChange === undefined || dayChange === 0 ? '' : dayChange > 0 ? 'gain' : 'loss';
     const history = tradePrices(stock, ledger.orders);
     const cycle = activeCycle(stock, history);
     const latest = missing.has(symbol) ? undefined : quote;
-    const cachedSell = cycle.length ? undefined : recentPrices(stock, ledger.orders).sell[0];
-    const loadedSell = latestTrade(cycle.length ? cycle : history, 'sell');
-    const lastSell = loadedSell && (!cachedSell || loadedSell.time >= cachedSell.time) ? loadedSell : cachedSell;
-    const idleEstimate = cycle.length ? undefined : buyEstimate(latest, lastSell, '卖出');
+    const recent = recentPrices(stock, ledger.orders);
+    const lastRecordedBuy = latestRecordedTrade(history, 'buy', recent.buy[0]);
+    const lastRecordedSell = latestRecordedTrade(history, 'sell', recent.sell[0]);
+    const lastSell = cycle.length ? latestTrade(cycle, 'sell') : lastRecordedSell;
+    const decision = cycleDecision(cycle, latest, lastSell, rules);
+    const recentEstimates = !cycle.length || decision?.quantity === 0
+      ? [priceEstimate(latest, lastRecordedSell, 'sell'), priceEstimate(latest, lastRecordedBuy)].filter(estimate => estimate !== undefined)
+      : [];
     const idleComparison = latest && lastSell ? priceComparison('卖出', latest.price, lastSell) : '';
     const buyObservation = latest && !cycle.length && buyObservationMatches(latest.price, lastSell, false, rules) ? idleComparison : '';
     return {
-      stock, symbol, quote, history, cycle, idleComparison, idleEstimate, buyObservation,
+      stock, symbol, quote, latest, dayChange, dayRate, dayTone, history, cycle, idleComparison, recentEstimates, buyObservation,
       name: quote?.name ?? stock.name,
-      decision: cycleDecision(cycle, latest, lastSell, rules),
+      decision, lastRecordedBuy, lastRecordedSell,
     };
   });
   const alertCard = editor?.type === 'alerts' ? cards.find(card => card.stock.id === editor.stock.id) : undefined;
-  function alertReference(kind: OrderKind) {
-    if (!alertCard) return;
-    const loaded = latestTrade(alertCard.history, kind);
-    const cached = recentPrices(alertCard.stock, ledger.orders)[kind][0];
-    return loaded && (!cached || loaded.time >= cached.time) ? loaded.price : cached?.price;
-  }
   const alertPosition = alertCard?.decision;
   return <>
     <div className="watch-toolbar">
@@ -365,7 +378,7 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
     {cards.length > 1 && <section className="panel decision-overview" aria-label="持仓速览">
       <h2>持仓速览</h2>
       <ul>
-        {cards.map(({ stock, name, decision, cycle, idleComparison, idleEstimate, buyObservation }) => <li key={stock.id}>
+        {cards.map(({ stock, name, latest, dayRate, dayTone, decision, cycle, idleComparison, recentEstimates, buyObservation }) => <li key={stock.id}>
           <button type="button" onClick={() => {
             const card = document.getElementById('holding-' + stock.id);
             const details = card?.querySelector('details.cycle-position');
@@ -374,32 +387,34 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
             card?.focus({ preventScroll: true });
           }}>
             <span className="decision-overview-copy">
-              <span className="decision-title">
-                <strong>{name}</strong>
-                {decision && decision.quantity > 0 && <span className="decision-quantity">剩 {number.format(decision.quantity)} 股</span>}
-                {decision ? <DecisionSignals decision={decision} /> : <>
-                  <span className={'decision-label ' + (buyObservation ? 'buy' : 'neutral')}>
-                    {buyObservation ? '买入观察' : cycle.length ? '暂无法测算' : '观望'}
-                  </span>
-                  {buyObservation && <strong className="buy">{buyObservation}</strong>}
-                </>}
+              <span className="decision-overview-heading">
+                <span className="decision-title">
+                  <strong>{name}</strong>
+                  {decision && decision.quantity > 0 && <span className="decision-quantity">剩 {number.format(decision.quantity)} 股</span>}
+                  {decision ? <DecisionSignals decision={decision} /> : <>
+                    <span className={'decision-label ' + (buyObservation ? 'buy' : 'neutral')}>
+                      {buyObservation ? '买入观察' : cycle.length ? '暂无法测算' : '观望'}
+                    </span>
+                    {buyObservation && <strong className="buy">{buyObservation}</strong>}
+                  </>}
+                </span>
+                {latest && <span className="decision-overview-quote">
+                  <strong aria-label={'最新价 ' + money(latest.price)}>{money(latest.price)}</strong>
+                  {dayRate !== undefined && <span className={dayTone} aria-label={'当日涨跌幅 ' + signedRate(dayRate)}>{signedRate(dayRate)}</span>}
+                </span>}
               </span>
-              {decision && <DecisionImpacts decision={decision} />}
-              {idleEstimate && <span className="decision-impacts decision-impacts-single"><BuyImpact estimate={idleEstimate} /></span>}
+              {recentEstimates.length > 0 ? <RecentTradeImpacts estimates={recentEstimates} /> : decision && <DecisionImpacts decision={decision} />}
               {!cycle.length && !buyObservation && idleComparison && <span className="decision-comparison muted">{idleComparison}</span>}
             </span>
             <ChevronRight size={16} aria-hidden="true" />
           </button>
         </li>)}
       </ul>
-      <p className="muted">收益率按本周期价差估算，未扣手续费。</p>
+      <p className="muted">周期盈亏和最近成交价对比均未扣手续费。</p>
     </section>}
     <div className="stock-grid">
-      {cards.map(({ stock, symbol, quote, history, cycle, name, decision, idleComparison, idleEstimate, buyObservation }) => {
+      {cards.map(({ stock, symbol, quote, dayChange, dayRate, dayTone, history, cycle, name, decision, idleComparison, recentEstimates, buyObservation }) => {
         const lastEnded = stock.cycles?.at(-1);
-        const dayChange = quote?.previousClose ? quote.price - quote.previousClose : undefined;
-        const dayRate = quote?.previousClose && dayChange !== undefined ? percent(dayChange, quote.previousClose) : undefined;
-        const dayTone = dayChange === undefined || dayChange === 0 ? '' : dayChange > 0 ? 'gain' : 'loss';
         const buys = cycle.filter(item => item.kind === 'buy');
         const sells = cycle.filter(item => item.kind === 'sell');
         return <article className="panel watch-card" key={stock.id} id={'holding-' + stock.id} tabIndex={-1}>
@@ -426,7 +441,7 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
           {!cycle.length && buyObservation ? <p className="decision-title watch-cycle-count">
             <span className="decision-label buy">买入观察</span><strong className="buy">{buyObservation}</strong>
           </p> : !cycle.length && idleComparison && <p className="muted watch-cycle-count">最新价{idleComparison}</p>}
-          {idleEstimate && <span className="decision-impacts decision-impacts-single"><BuyImpact estimate={idleEstimate} /></span>}
+          {!cycle.length && recentEstimates.length > 0 && <RecentTradeImpacts estimates={recentEstimates} />}
           {cycle.length > 0 && <>
             <CyclePosition decision={decision} />
             <div className="price-headings" aria-hidden="true"><span>周期内买入</span><span>周期内卖出</span></div>
@@ -469,8 +484,8 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
       {editor?.type === 'alerts' ? <AlertManager cloud={alertCloud} stock={{ symbol: symbolFor(editor.stock), name: editorQuote?.name ?? editor.stock.name }}
         context={{
           quote: editorSymbol && !missing.has(editorSymbol) ? editorQuote : undefined,
-          lastBuy: alertReference('buy'),
-          lastSell: alertReference('sell'),
+          lastBuy: alertCard?.lastRecordedBuy?.price,
+          lastSell: alertCard?.lastRecordedSell?.price,
           position: alertPosition?.quantity ? { quantity: alertPosition.quantity, cost: alertPosition.result.remainingBuyCost } : undefined,
         }} close={() => dialog.current?.close()} />
         : editor && <form onSubmit={event => void submit(event)}>
