@@ -486,7 +486,11 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
           quote: editorSymbol && !missing.has(editorSymbol) ? editorQuote : undefined,
           lastBuy: alertCard?.lastRecordedBuy?.price,
           lastSell: alertCard?.lastRecordedSell?.price,
-          position: alertPosition?.quantity ? { quantity: alertPosition.quantity, cost: alertPosition.result.remainingBuyCost } : undefined,
+          position: alertPosition?.quantity ? {
+            quantity: alertPosition.quantity,
+            cost: alertPosition.result.remainingBuyCost,
+            highestBuy: alertPosition.result.remainingBuyLots.reduce((highest, lot) => Math.max(highest, lot.price), 0),
+          } : undefined,
         }} close={() => dialog.current?.close()} />
         : editor && <form onSubmit={event => void submit(event)}>
         <div className="section-title editor-heading">

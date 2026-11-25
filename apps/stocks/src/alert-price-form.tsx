@@ -7,11 +7,11 @@ export type AlertPriceContext = {
   quote?: Quote;
   lastBuy?: number;
   lastSell?: number;
-  position?: { quantity: number; cost: number };
+  position?: { quantity: number; cost: number; highestBuy: number };
 };
 
 const adjustmentStep = 50;
-const basisLabels = { current: '当前价', buy: '最近买价', sell: '最近卖价', average: '周期剩余均价' } as const;
+const basisLabels = { current: '当前价', highestBuy: '剩余最高买价', buy: '最近买价', sell: '最近卖价', average: '周期剩余均价' } as const;
 type Basis = keyof typeof basisLabels;
 
 function adjustment(value: string) {
@@ -44,7 +44,12 @@ export function AlertPriceForm({ kind, price, setPrice, context }: {
   const reached = delta !== undefined && (buy ? delta >= 0 : delta <= 0);
   const profit = !buy && position && target !== undefined ? target * position.quantity - position.cost : undefined;
 
-  const bases = { current: quote?.price, buy: lastBuy, sell: lastSell, average: position && position.cost / position.quantity };
+  const bases = [
+    { key: buy ? 'current' : 'highestBuy', price: buy ? quote?.price : position?.highestBuy },
+    { key: 'buy', price: lastBuy },
+    { key: 'sell', price: lastSell },
+    { key: 'average', price: position && position.cost / position.quantity },
+  ] as const;
   const points = adjustment(change);
   const maximum = buy ? 9_999 : Number.MAX_SAFE_INTEGER;
   const validChange = points !== undefined && points <= maximum;
@@ -65,15 +70,14 @@ export function AlertPriceForm({ kind, price, setPrice, context }: {
   }
 
   return <>
-    <div className="alert-price-quote">
+    {context && <div className="alert-price-quote">
       <div><span className="muted">最新价</span><strong>{quote ? money(quote.price) : '暂无行情'}</strong></div>
       {quote?.previousClose && <span className="muted">当日 {signedPercent(percent(quote.price - quote.previousClose, quote.previousClose))}</span>}
-    </div>
-    <fieldset className="alert-bases">
+    </div>}
+    {bases.some(basis => basis.price !== undefined) && <fieldset className="alert-bases">
       <legend>价格基准</legend>
       <div className="alert-basis-options">
-        {(Object.keys(basisLabels) as Basis[]).map(key => {
-          const available = bases[key];
+        {bases.map(({ key, price: available }) => {
           const selected = basis?.key === key;
           const displayed = selected ? basis.price : available;
           return <button key={key} type="button" disabled={!available} aria-pressed={selected}
@@ -101,7 +105,7 @@ export function AlertPriceForm({ kind, price, setPrice, context }: {
         </div>
         <button type="button" aria-label="增加 0.5 个百分点" disabled={points === maximum} onClick={() => changeBy(adjustmentStep)}>＋</button>
       </div>
-    </fieldset>
+    </fieldset>}
     <label className="watch-input">提醒价（元）
       <input value={price} onChange={event => { setBasis(undefined); setPrice(event.target.value); }} inputMode="decimal" required />
     </label>

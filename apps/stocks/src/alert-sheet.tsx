@@ -6,6 +6,7 @@ import type { AlertCloud } from './alert-cloud.ts';
 import { AlertPriceForm, type AlertPriceContext } from './alert-price-form.tsx';
 
 type StockAlertTarget = { symbol: string; name: string };
+type AlertDraft = { target: StockAlertTarget; kind: OrderKind; original?: PriceAlert };
 type Props = {
   cloud: AlertCloud;
   stock?: StockAlertTarget;
@@ -44,7 +45,7 @@ export function AlertManager({ cloud, stock, close, context }: Props) {
   const [notification, setNotification] = useState<{ endpoint?: string; denied: boolean }>();
   const [working, setWorking] = useState(false);
   const [error, setError] = useState('');
-  const [kind, setKind] = useState<OrderKind>();
+  const [draft, setDraft] = useState<AlertDraft>();
   const formDialog = useRef<HTMLDialogElement>(null);
   const [price, setPrice] = useState('');
   const [confirmSave, setConfirmSave] = useState(false);
@@ -52,8 +53,8 @@ export function AlertManager({ cloud, stock, close, context }: Props) {
   const [registration, setRegistration] = useState<ServiceWorkerRegistration>();
 
   useEffect(() => {
-    if (kind && !formDialog.current?.open) formDialog.current?.showModal();
-  }, [kind]);
+    if (draft && !formDialog.current?.open) formDialog.current?.showModal();
+  }, [draft]);
 
   useEffect(() => {
     let mounted = true;
@@ -158,11 +159,18 @@ export function AlertManager({ cloud, stock, close, context }: Props) {
     }, '已在此设备启用通知');
   }
 
-  async function add(target: StockAlertTarget, direction: OrderKind, confirmed = false) {
+  async function saveReminder({ target, kind, original }: AlertDraft, confirmed = false) {
     const saved = await run(async () => {
-      const alert: PriceAlert = { ...target, id: crypto.randomUUID(), kind: direction, price: cents(price) };
+      const value = cents(price);
+      if (original?.price === value) return;
+      const alert: PriceAlert = { ...target, kind, price: value, id: crypto.randomUUID() };
       try {
-        await editAlerts(alerts => [...alerts, alert], !confirmed);
+        await editAlerts(alerts => {
+          if (!original) return [...alerts, alert];
+          if (!alerts.some(item => item.id === original.id)) throw Error('此提醒已在其他设备更新或移除，请返回列表后重试。');
+          // A new ID keeps delivery receipts for the old threshold from affecting this rule.
+          return alerts.map(item => item.id === original.id ? alert : item);
+        }, !confirmed);
       } catch (reason) {
         if (reason === notificationRequired) setConfirmSave(true);
         throw reason;
@@ -171,12 +179,12 @@ export function AlertManager({ cloud, stock, close, context }: Props) {
     if (saved) formDialog.current?.close();
   }
 
-  function openForm(direction: OrderKind) {
+  function openForm(target: StockAlertTarget, direction: OrderKind, original?: PriceAlert) {
     setConfirmSave(false);
-    setPrice('');
+    setPrice(original ? (original.price / 100).toFixed(2) : '');
     setError('');
     setMessage('');
-    setKind(direction);
+    setDraft({ target: { name: target.name, symbol: target.symbol }, kind: direction, original });
   }
 
   const alerts = (account?.alerts ?? []).filter(alert => !stock || alert.symbol === stock.symbol);
@@ -200,6 +208,8 @@ export function AlertManager({ cloud, stock, close, context }: Props) {
           <strong>{alert.kind === 'buy' ? '买入 ≤ ' : '卖出 ≥ '}{money(alert.price)}</strong>
           <span className="muted">{alert.triggeredAt ? '已触发' : '待触发'}</span>
         </div>
+        <button type="button" disabled={pending} aria-label={'编辑 ' + alert.name + ' ' + money(alert.price) + ' 提醒'}
+          onClick={() => openForm(alert, alert.kind, alert)}>编辑</button>
         {alert.triggeredAt && <button type="button" disabled={pending}
           onClick={() => {
             const id = crypto.randomUUID();
@@ -216,35 +226,33 @@ export function AlertManager({ cloud, stock, close, context }: Props) {
   const feedback = error ? <p className="form-message" role="alert">{error}</p>
     : message && <p className="muted" role="status">{message}</p>;
 
-  if (!stock) return <section className="panel alert-settings"><h2>价格提醒</h2>{content}{feedback}</section>;
-
   const enableButton = state && notification && !enabled && <button type="button" className="alert-enable" disabled={pending}
     onClick={() => void enable()}>启用通知</button>;
 
   return <>
-    <div className="editor-layout">
+    {stock ? <div className="editor-layout">
       <div className="section-title editor-heading">
         <h2 id="watch-editor-title">价格提醒</h2>
         <button type="button" onClick={close}>关闭</button>
       </div>
-      <div className="editor-content">{content}{!kind && feedback}</div>
+      <div className="editor-content">{content}{!draft && feedback}</div>
       {state && <div className="editor-footer alert-list-actions alert-list-footer">
-        <button type="button" className="tinted" disabled={pending} onClick={() => openForm('buy')}>买入</button>
-        <button type="button" disabled={pending} onClick={() => openForm('sell')}>卖出</button>
+        <button type="button" className="tinted" disabled={pending} onClick={() => openForm(stock, 'buy')}>买入提醒</button>
+        <button type="button" disabled={pending} onClick={() => openForm(stock, 'sell')}>卖出提醒</button>
         {enableButton}
       </div>}
-    </div>
+    </div> : <section className="panel alert-settings"><h2>价格提醒</h2>{content}{!draft && feedback}</section>}
     <dialog ref={formDialog} className="sync-dialog entry-sheet alert-price-sheet" aria-labelledby="alert-price-title"
-      onClose={event => { event.stopPropagation(); setKind(undefined); setConfirmSave(false); setError(''); }}
+      onClose={event => { event.stopPropagation(); setDraft(undefined); setConfirmSave(false); setError(''); }}
       onCancel={event => { event.stopPropagation(); if (pending) event.preventDefault(); }}>
-      {kind && <form onSubmit={event => { event.preventDefault(); if (state && !pending && !confirmSave) void add(stock, kind); }}>
+      {draft && <form onSubmit={event => { event.preventDefault(); if (state && !pending && !confirmSave) void saveReminder(draft); }}>
         <div className="section-title editor-heading">
-          <h2 id="alert-price-title">{kind === 'buy' ? '买入提醒' : '卖出提醒'}</h2>
+          <h2 id="alert-price-title">{draft.original ? '编辑' : ''}{draft.kind === 'buy' ? '买入提醒' : '卖出提醒'}</h2>
           <button type="button" disabled={pending} onClick={() => formDialog.current?.close()}>返回</button>
         </div>
         <div className="editor-content">
-          <p className="muted">{stock.name} · {stock.symbol.slice(2)}</p>
-          <AlertPriceForm kind={kind} price={price} setPrice={value => { setPrice(value); setConfirmSave(false); setError(''); setMessage(''); }} context={context} />
+          <p className="muted">{draft.target.name} · {draft.target.symbol.slice(2)}</p>
+          <AlertPriceForm kind={draft.kind} price={price} setPrice={value => { setPrice(value); setConfirmSave(false); setError(''); setMessage(''); }} context={context} />
           {(!confirmSave || error !== notificationRequired.message) && feedback}
         </div>
         <div className="editor-footer alert-form-footer">
@@ -252,7 +260,7 @@ export function AlertManager({ cloud, stock, close, context }: Props) {
           <div className="alert-list-actions">
             {enableButton}
             {confirmSave ? <button type="button" className="primary" disabled={pending}
-              onClick={() => void add(stock, kind, true)}>{saving ? '保存中…' : '仍然保存'}</button>
+              onClick={() => void saveReminder(draft, true)}>{saving ? '保存中…' : '仍然保存'}</button>
               : <button className="primary" disabled={!state || pending || !price.trim()}>{saving ? '保存中…' : '保存提醒'}</button>}
           </div>
         </div>
