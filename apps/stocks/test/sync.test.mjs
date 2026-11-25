@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { webcrypto } from 'node:crypto';
 import 'fake-indexeddb/auto';
 import { calendarYear, splitLedger } from '../src/archive.ts';
-import { matchesAlert, openAlerts, updateDevice } from '../src/alerts.ts';
+import { matchesAlert, openAlerts, updateAlertAccount } from '../src/alerts.ts';
 import { emptyLedger, finishCycle, recordPrice, tradePrices } from '../src/domain.ts';
 import { decrypt, encrypt, loadArchiveYears, SyncConflict, syncGithub } from '../src/backup.ts';
 import { readLocal, updateLocal } from '../src/store.ts';
@@ -246,12 +246,12 @@ test('encrypted yearly sync uses stable paths and publishes complete snapshots a
   await reminders.update(state => {
     // Simulate an unrelated ledger commit after reading the alerts snapshot.
     if (++attempts === 1) externalUpdate('open.json', localIndex);
-    return updateDevice(state, 'secondPhone', phone => ({ ...phone, alerts: [...phone.alerts, second] }));
+    return updateAlertAccount(state, 'family', account => ({ ...account, alerts: [...account.alerts, second] }));
   });
   assert.equal(attempts, 2);
   const familyState = (await reminders.read()).data;
   assert.deepEqual(familyState.devices.firstPhone.alerts, [first]);
-  assert.deepEqual(familyState.devices.secondPhone.alerts, [second]);
+  assert.deepEqual(familyState.accounts.family.alerts, [second]);
   assert.equal(await decrypt(familyState.privateKeyBox, 'family-monitor-secret'), 'test-private-key');
   await assert.rejects(decrypt(familyState.privateKeyBox, secret), /无法解密/);
   assert.deepEqual(files().get('open.json'), localIndex);

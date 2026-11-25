@@ -2,7 +2,7 @@ import { createECDH } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { generateRequestDetails, generateVAPIDKeys, getVapidHeaders } from 'web-push';
-import { matchesAlert, openAlerts, requireAlerts } from './src/alerts.ts';
+import { applySharedAlertResults, matchesAlert, openAlerts, requireAlerts, sharedAlertTargets } from './src/alerts.ts';
 import { decrypt, encrypt } from './src/backup.ts';
 import { money } from './src/format.ts';
 import { fetchQuotes } from './src/quotes.ts';
@@ -94,7 +94,9 @@ async function main() {
   }
 
   if (command === '--test') {
-    const devices = Object.values(initial.devices).flatMap(device => device.subscription ? [device.subscription] : []);
+    const legacyDevices = Object.values(initial.devices).flatMap(device => device.subscription ? [device.subscription] : []);
+    const sharedDevices = Object.values(initial.accounts ?? {}).flatMap(account => Object.values(account.devices));
+    const devices = [...new Map([...legacyDevices, ...sharedDevices].map(device => [device.endpoint, device])).values()];
     if (!devices.length) throw Error('请先在 iPhone 主屏幕上的股票账簿启用通知');
     let accepted = 0;
     for (const device of devices) {
@@ -118,8 +120,11 @@ async function main() {
 
   const delivered = new Map();
   const expired = new Map();
+  const sharedDelivered = new Map();
+  const sharedExpired = new Map();
+  const hasResults = () => delivered.size || expired.size || sharedDelivered.size || sharedExpired.size;
   async function saveResults(remote) {
-    if (!delivered.size && !expired.size) return;
+    if (!hasResults()) return;
     await remote.update(current => {
       const state = checkedState(current);
       let changed = false;
@@ -131,30 +136,34 @@ async function main() {
         changed = true;
         return [id, { ...device, alerts, subscription: stale ? undefined : device.subscription }];
       }));
-      return changed ? { ...state, devices } : state;
+      return applySharedAlertResults(changed ? { ...state, devices } : state, sharedDelivered, sharedExpired);
     });
     delivered.clear();
     expired.clear();
+    sharedDelivered.clear();
+    sharedExpired.clear();
   }
 
   async function poll() {
     const now = Date.now();
     const { date, session } = marketTime(now);
     const trading = session && !closedDates.has(date);
-    if (!trading && !delivered.size && !expired.size) return;
+    if (!trading && !hasResults()) return;
     const remote = await openAlerts(credential);
     await saveResults(remote);
     if (!trading) return;
     const state = checkedState((await remote.read()).data);
-    const pending = Object.entries(state.devices).flatMap(([id, device]) => device.subscription
+    const legacy = Object.entries(state.devices).flatMap(([id, device]) => device.subscription
       ? device.alerts.filter(alert => !alert.triggeredAt).map(alert => ({ id, alert, device: device.subscription }))
       : []);
+    const pending = [...legacy, ...sharedAlertTargets(state)];
     if (!pending.length) return;
     const quotes = await fetchQuotes([...new Set(pending.map(({ alert }) => alert.symbol))], AbortSignal.timeout(10_000));
 
-    for (const { id, alert, device } of pending) {
+    for (const { account, id, alert, device } of pending) {
+      const deviceKey = account === undefined ? id : JSON.stringify([account, id]);
       const quote = quotes.get(alert.symbol);
-      if (expired.has(id) || !quote || !matchesAlert(alert, quote.price)) continue;
+      if ((account === undefined ? expired : sharedExpired).has(deviceKey) || !quote || !matchesAlert(alert, quote.price)) continue;
       const time = Date.parse(quote.time);
       const quoted = marketTime(time);
       if (quoted.date !== date || quoted.session !== session || now - time > maxQuoteAge || time > Date.now() + 15_000) continue;
@@ -166,11 +175,13 @@ async function main() {
           body: '最新价 ' + money(quote.price) + '，' + condition + ' 提醒价 ' + money(alert.price),
           tag: 'stock-alert-' + alert.id,
         });
-        delivered.set(alert.id, new Date().toISOString());
+        const acceptedAt = new Date().toISOString();
+        if (account === undefined) delivered.set(alert.id, acceptedAt);
+        else sharedDelivered.set(JSON.stringify([account, alert.id, id]), acceptedAt);
         console.log('已发送提醒 ' + alert.symbol + ' ' + direction);
       } catch (error) {
         if ([404, 410].includes(error.statusCode)) {
-          expired.set(id, device.endpoint);
+          (account === undefined ? expired : sharedExpired).set(deviceKey, device.endpoint);
           console.error('一台设备的订阅已失效，请在对应 iPhone 上重新启用通知');
         } else {
           console.error('提醒发送失败，将在仍满足阈值时重试' + (error.statusCode ? '（HTTP ' + error.statusCode + '）' : ''));

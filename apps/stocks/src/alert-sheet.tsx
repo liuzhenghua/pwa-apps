@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { cents, type OrderKind } from './domain.ts';
 import { money } from './format.ts';
-import { updateDevice, type PriceAlert } from './alerts.ts';
+import { alertAccount, enrollAlertDevice, updateAlertAccount, type PriceAlert } from './alerts.ts';
 import type { AlertCloud } from './alert-cloud.ts';
 import { AlertPriceForm, type AlertPriceContext } from './alert-price-form.tsx';
 
@@ -16,7 +16,7 @@ type Props = {
 const deviceKey = 'stocks:alert-device';
 const installGuide = '在 iPhone 上，请先用 Safari 将股票账簿添加到主屏幕，再从主屏幕打开。';
 const permissionGuide = '通知权限已关闭，请在系统或浏览器设置中允许通知，然后返回重新启用。';
-const notificationRequired = new Error('此设备尚未启用通知。');
+const notificationRequired = new Error('此账号没有启用通知的设备。');
 
 function saveDeviceId() {
   const existing = localStorage.getItem(deviceKey);
@@ -80,12 +80,19 @@ export function AlertManager({ cloud, stock, close, context }: Props) {
     };
   }, [registration, state]);
 
-  useEffect(() => { void cloud.refresh(); }, [cloud]);
+  useEffect(() => {
+    const refresh = () => { void cloud.refresh(true); };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, [cloud]);
 
   const pending = working || saving;
-  const device = state?.devices[deviceId];
+  const account = state && alertAccount(state, cloud.account);
+  const legacy = state?.devices[deviceId];
+  const device = account?.devices[deviceId];
   const { endpoint, denied } = notification ?? {};
-  const enabled = Boolean(endpoint && device?.subscription?.endpoint === endpoint);
+  const enabled = Boolean(endpoint && device?.endpoint === endpoint);
   const supported = supportsPush();
 
   async function run(action: () => Promise<void>, success: string) {
@@ -104,23 +111,16 @@ export function AlertManager({ cloud, stock, close, context }: Props) {
     }
   }
 
-  async function editAlerts(edit: (alerts: PriceAlert[]) => PriceAlert[], checkNotification = false) {
-    const currentEndpoint = checkNotification ? await localEndpoint() : undefined;
-    if (checkNotification && !currentEndpoint) {
-      setNotification({ denied: supportsPush() && Notification.permission === 'denied' });
-      throw notificationRequired;
-    }
-    const id = saveDeviceId();
-    setDeviceId(id);
-    try {
-      await cloud.update(current => updateDevice(current, id, latest => {
-        if (checkNotification && latest.subscription?.endpoint !== currentEndpoint) throw notificationRequired;
-        return { ...latest, alerts: edit(latest.alerts) };
-      }));
-    } catch (reason) {
-      if (reason === notificationRequired) setNotification({ denied: false });
-      throw reason;
-    }
+  function editAlerts(edit: (alerts: PriceAlert[]) => PriceAlert[], checkNotification = false) {
+    return cloud.update(current => updateAlertAccount(current, cloud.account, latest => {
+      if (checkNotification && !Object.keys(latest.devices).length) throw notificationRequired;
+      return { ...latest, alerts: edit(latest.alerts) };
+    }));
+  }
+
+  function migrateLegacy() {
+    void run(() => cloud.update(current => enrollAlertDevice(current, cloud.account, deviceId,
+      legacy?.subscription?.endpoint === endpoint ? legacy?.subscription : undefined)), '已合并此设备的旧提醒');
   }
 
   async function enable() {
@@ -149,7 +149,7 @@ export function AlertManager({ cloud, stock, close, context }: Props) {
       const pushDevice = { endpoint: subscription.endpoint, keys: { auth: keys.auth, p256dh: keys.p256dh } };
       await cloud.update(current => {
         if (current.publicKey !== publicKey) throw Error('推送配置已更新，请刷新后重试');
-        return updateDevice(current, id, latest => ({ ...latest, subscription: pushDevice }));
+        return enrollAlertDevice(current, cloud.account, id, pushDevice);
       });
       setNotification({ endpoint: subscription.endpoint, denied: false });
       setConfirmSave(false);
@@ -177,31 +177,35 @@ export function AlertManager({ cloud, stock, close, context }: Props) {
     setKind(direction);
   }
 
-  const alerts = stock
-    ? (device?.alerts ?? []).filter(alert => alert.symbol === stock.symbol).map(alert => ({ alert, owner: deviceId }))
-    : Object.entries(state?.devices ?? {}).flatMap(([owner, { alerts: items }]) => items.map(alert => ({ alert, owner })));
+  const alerts = (account?.alerts ?? []).filter(alert => !stock || alert.symbol === stock.symbol);
   const content = <>
     {stock && <p className="muted">{stock.name} · {stock.symbol.slice(2)}</p>}
     {!stock && <div className="alert-device">
+      {account && <p className="muted">{cloud.account} · {Object.keys(account.devices).length} 台设备已启用通知</p>}
       <strong>{enabled ? '此设备已启用通知' : '此设备尚未启用通知'}</strong>
-      {!enabled && <p className="muted">{denied ? permissionGuide : !supported ? installGuide : '启用后，此设备可以接收为它设置的价格提醒。'}</p>}
+      {!enabled && <p className="muted">{denied ? permissionGuide : !supported ? installGuide : '启用后，此设备会收到同名账号的价格提醒。'}</p>}
       {state && supported && !denied && <button type="button" className={enabled ? 'link-button alert-rebind' : ''}
         disabled={pending} onClick={() => void enable()}>{enabled ? '重新绑定此设备' : '在此设备启用通知'}</button>}
     </div>}
+    {legacy && <div className="alert-device">
+      <p className="muted">此设备有旧版提醒或通知绑定，可合并到 {cloud.account}。</p>
+      <button type="button" disabled={pending} onClick={migrateLegacy}>合并旧提醒</button>
+    </div>}
     {state && (alerts.length ? <ul className="alert-list">
-      {alerts.map(({ alert, owner }) => <li key={owner + ':' + alert.id}>
+      {alerts.map(alert => <li key={alert.id}>
         <div>
           {!stock && <strong className="alert-stock-name">{alert.name} · {alert.symbol.slice(2)}</strong>}
           <strong>{alert.kind === 'buy' ? '买入 ≤ ' : '卖出 ≥ '}{money(alert.price)}</strong>
-          <span className="muted">{alert.triggeredAt ? '已触发' : '待触发'}{!stock && (owner === deviceId ? ' · 此设备' : ' · 其他设备')}</span>
+          <span className="muted">{alert.triggeredAt ? '已触发' : '待触发'}</span>
         </div>
-        {owner === deviceId && alert.triggeredAt && <button type="button" disabled={pending}
+        {alert.triggeredAt && <button type="button" disabled={pending}
           onClick={() => {
             const id = crypto.randomUUID();
-            void run(() => editAlerts(items => items.map(item => item.id === alert.id ? { ...item, id, triggeredAt: undefined } : item), true), '已重新启用提醒');
+            void run(() => editAlerts(items => items.map(item => item.id === alert.id ?
+              { ...item, id, triggeredAt: undefined, notifiedDevices: undefined } : item)), '已重新启用提醒');
           }}>重新启用</button>}
-        {owner === deviceId && <button type="button" disabled={pending} aria-label={'移除 ' + alert.name + ' ' + money(alert.price) + ' 提醒'}
-          onClick={() => void run(() => editAlerts(items => items.filter(item => item.id !== alert.id)), '已移除提醒')}>移除</button>}
+        <button type="button" disabled={pending} aria-label={'移除 ' + alert.name + ' ' + money(alert.price) + ' 提醒'}
+          onClick={() => void run(() => editAlerts(items => items.filter(item => item.id !== alert.id)), '已移除提醒')}>移除</button>
       </li>)}
     </ul> : <p className="muted">{stock ? '这只股票还没有价格提醒。' : '还没有设置价格提醒。'}</p>)}
     {!state && loading && <p className="muted" role="status">正在读取价格提醒…</p>}
@@ -242,7 +246,7 @@ export function AlertManager({ cloud, stock, close, context }: Props) {
           {(!confirmSave || error !== notificationRequired.message) && feedback}
         </div>
         <div className="editor-footer alert-form-footer">
-          {confirmSave && <p className="muted" role="status">此设备尚未启用通知。可以先保存规则，稍后启用通知。</p>}
+          {confirmSave && <p className="muted" role="status">此账号还没有可接收通知的设备。可以先保存规则，稍后启用通知。</p>}
           <div className="alert-list-actions">
             {enableButton}
             {confirmSave ? <button type="button" className="primary" disabled={pending}

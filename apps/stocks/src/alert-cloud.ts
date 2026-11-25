@@ -4,9 +4,10 @@ import { bundledToken, missingTokenBoxMessage } from './backup.ts';
 type Snapshot = { state?: AlertState; error?: string; loading: boolean; saving: boolean };
 const freshFor = 45_000;
 
-export function createAlertCloud(credential: string) {
+export function createAlertCloud(credential: string, folder: string) {
+  const account = folder.trim();
   const setupError = !bundledToken ? missingTokenBoxMessage :
-    !credential.trim() ? '请先在同步配置中填写云端访问口令。' : undefined;
+    !credential.trim() || !/^[A-Za-z0-9_-]{1,60}$/.test(account) ? '请先在同步配置中填写云端名字和访问口令。' : undefined;
   let snapshot: Snapshot = { error: setupError, loading: false, saving: false };
   let loadedAt = 0;
   let generation = 0;
@@ -29,6 +30,7 @@ export function createAlertCloud(credential: string) {
   }
 
   return {
+    account,
     snapshot: () => snapshot,
     subscribe(listener: () => void) {
       listeners.add(listener);

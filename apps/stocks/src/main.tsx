@@ -36,7 +36,7 @@ function App() {
     credential: readStored('stocks:cloud-passphrase', ''),
     secret: readStored('stocks:secret', ''),
   }));
-  const alertCloud = useMemo(() => createAlertCloud(config.credential), [config.credential]);
+  const alertCloud = useMemo(() => createAlertCloud(config.credential, config.folder), [config.credential, config.folder]);
   const job = useRef(false);
   const checkedStartupSync = useRef(false);
   const channel = useRef<BroadcastChannel | undefined>(undefined);
