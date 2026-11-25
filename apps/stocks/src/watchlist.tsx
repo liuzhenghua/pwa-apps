@@ -92,7 +92,7 @@ function latestTrade(history: TradePrice[], kind: OrderKind): PriceRecord | unde
     trade.kind === kind && (!previous || trade.time > previous.time) ? trade : previous, undefined);
 }
 
-function buyEstimate(quote?: Quote, reference?: PriceRecord) {
+function buyEstimate(quote?: Quote, reference?: PriceRecord, referenceLabel: '买入' | '卖出' = '买入') {
   const quantity = reference?.quantity;
   if (!quote || !reference || quantity === undefined) return;
   const cost = quote.price * quantity;
@@ -100,7 +100,7 @@ function buyEstimate(quote?: Quote, reference?: PriceRecord) {
   if (!Number.isSafeInteger(cost) || !Number.isSafeInteger(difference)) return;
   const tone = difference > 0 ? 'gain' : difference < 0 ? 'loss' : '';
   const rate = Math.abs(percent(quote.price - reference.price, reference.price)).toFixed(2);
-  const impact = difference === 0 ? '与上次买入同价' :
+  const impact = difference === 0 ? '与上次' + referenceLabel + '同价' :
     (difference > 0 ? '省 ' : '贵 ') + money(Math.abs(difference));
   const impactRate = difference === 0 ? '' : rate + '%';
   return { quantity, cost, impact, impactRate, tone };
@@ -338,11 +338,8 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
     const latest = missing.has(symbol) ? undefined : quote;
     const cachedSell = cycle.length ? undefined : recentPrices(stock, ledger.orders).sell[0];
     const loadedSell = latestTrade(cycle.length ? cycle : history, 'sell');
-    const loadedBuy = cycle.length ? undefined : latestTrade(history, 'buy');
-    const cachedBuy = cycle.length ? undefined : recentPrices(stock, ledger.orders).buy[0];
-    const lastBuy = loadedBuy && (!cachedBuy || loadedBuy.time >= cachedBuy.time) ? loadedBuy : cachedBuy;
-    const idleEstimate = cycle.length ? undefined : buyEstimate(latest, lastBuy);
     const lastSell = loadedSell && (!cachedSell || loadedSell.time >= cachedSell.time) ? loadedSell : cachedSell;
+    const idleEstimate = cycle.length ? undefined : buyEstimate(latest, lastSell, '卖出');
     const idleComparison = latest && lastSell ? priceComparison('卖出', latest.price, lastSell) : '';
     const buyObservation = latest && !cycle.length && buyObservationMatches(latest.price, lastSell, false, rules) ? idleComparison : '';
     return {
