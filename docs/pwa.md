@@ -1,46 +1,22 @@
-# PWA 是什么
+# PWA 安装与离线使用
 
-PWA（Progressive Web App，渐进式 Web 应用）仍然是通过网址访问的网页应用。它可以借助浏览器提供的能力，在支持的设备上添加到主屏幕、以接近独立应用的窗口打开，并缓存部分资源供离线使用。安装入口和实际能力会因浏览器及操作系统而异。
+四个应用都可通过浏览器安装到主屏幕。先联网打开对应应用，在浏览器菜单选择「添加到主屏幕」或「安装应用」，再通过主屏幕图标启动。安装入口取决于浏览器和操作系统。
 
-## 能使用哪些设备能力
+## 离线能做什么
 
-PWA 可以调用浏览器开放的 Web API，获得一部分接近原生应用的能力。例如：
+页面资源缓存就绪后，应用可以离线打开。清除站点数据可能同时删除本机记录、配置和缓存。
 
-| 能力 | 常见用途 |
-| --- | --- |
-| 相机、麦克风、定位 | 拍照、录音、获取位置；使用时通常需要用户授权。 |
-| 本地文件与系统分享 | 选择照片或文档、把内容分享到其他应用；部分平台也支持把 PWA 注册为分享目标或文件处理应用。 |
-| 通知与后台任务 | 在支持的浏览器中显示系统通知、接收推送，或在网络恢复后执行后台同步。 |
-| 桌面集成 | 显示桌面图标，从主屏幕启动，并以独立窗口打开。 |
+| 应用 | 本机数据 | 离线可用 | 需要联网 |
+| --- | --- | --- | --- |
+| [笔记](../apps/notes/README.md) | 笔记、分类和回收站存于 IndexedDB | 查看和编辑笔记 | GitHub 同步 |
+| [照片布局](../apps/photo-layout/README.md) | 照片和排版只在当前页面会话中保留 | 排版并导出 JPG | 首次加载应用 |
+| [资产簿](../apps/assets/README.md) | 账簿与月度报告存于 IndexedDB | 查看和编辑账簿、导入和导出备份 | GitHub 同步 |
+| [股票账簿](../apps/stocks/README.md) | 股票、交易和已下载归档存于 IndexedDB | 记录交易、查看本机数据 | 最新行情、GitHub 同步、下载归档和接收价格提醒 |
 
-这些能力并非安装 PWA 后就自动获得，也不是 PWA 独有：不少能力普通网页同样可以调用。每项能力都要由应用单独实现，并受浏览器、操作系统、HTTPS 和用户授权限制；尤其不能假设后台任务在所有手机上可靠执行。参见 [MDN 的 PWA 能力概览](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/What_is_a_progressive_web_app)与 [PWA API 参考](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Reference)。
+照片布局在浏览器支持文件分享时可调用系统分享面板。股票账簿在保存完整配置后，会在在线启动时自动同步一次。价格提醒由独立盯盘进程发送 Web Push，设备启用流程见[股票账簿说明](../apps/stocks/README.md#股票价格提醒)。
 
-**本项目目前实际用到的设备能力**是桌面安装、独立窗口和离线资源缓存。照片布局通过文件选择框读取本地照片，并在浏览器支持时使用系统分享面板发送生成的 JPG；文件选择也是普通网页能使用的 Web API。项目目前没有调用相机、定位、系统通知、推送或后台同步。GitHub 同步由用户手动触发。
+## 构建和验证
 
-## 本项目如何实现
+PWA 指渐进式 Web 应用。本项目为各应用生成独立的 `manifest.webmanifest` 与 Service Worker。前者声明应用名、图标、启动地址和显示方式，后者缓存应用页面及静态资源。
 
-`pwa-apps` 在同一个 GitHub Pages 站点发布笔记、照片布局、资产簿和股票账簿。
-
-| 组成 | 在本项目中的作用 |
-| --- | --- |
-| `manifest.webmanifest` | 分别声明应用名称、图标、启动地址、页面范围和独立窗口显示方式。 |
-| `sw.js`（Service Worker） | 由 `vite-plugin-pwa` 在构建时生成，缓存应用页面和静态资源，让已访问的应用在离线时仍有机会打开。 |
-| HTTPS | GitHub Pages 提供安全连接，供浏览器使用 Service Worker 等 PWA 能力。 |
-
-四个应用可以分别添加到主屏幕，启动路径和 Service Worker 范围分别位于 `/pwa-apps/notes/`、`/pwa-apps/photo-layout/`、`/pwa-apps/assets/` 和 `/pwa-apps/stocks/`。仓库改名时，构建路径也要相应调整。
-
-## 安装、离线与数据
-
-先联网打开应用，再使用浏览器的“添加到主屏幕”或“安装应用”功能。浏览器需要先成功取得并缓存资源；首次访问之前无法离线打开。浏览器也可能清理缓存，因此不能把离线缓存当成永久保存的数据。
-
-- **笔记：** 页面资源缓存与笔记数据是两回事。笔记正文保存在当前浏览器的 `localStorage`，离线时可以查看和编辑；手动同步到 GitHub 私有仓库需要联网。
-- **照片布局：** 已缓存的页面可以离线打开，排版、导出和系统分享在设备上进行；选入的照片只在当前页面会话中使用，刷新后需要重新选择。
-- **资产簿与股票账簿：** 账簿保存在 IndexedDB 中，可离线查看和编辑。JSON 导出与导入可在本机进行，加密同步到 GitHub 私有仓库需要联网。
-
-清除浏览器的站点数据可能同时删除本地记录、同步配置和离线缓存。跨设备同步配置见 [项目 README](../README.md#云端数据与加密-token-配置)。
-
-## 开发时如何检查
-
-运行 `npm run build` 后，每个应用的 `manifest.webmanifest` 和 `sw.js` 会生成在 `dist/` 下对应的应用目录。完整的安装和离线行为应在构建后的站点上检查；开发服务器的表现不一定与发布版本相同。GitHub Pages 的 HTTPS 地址适合在手机上验证。
-
-延伸阅读：[MDN：什么是 PWA](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/What_is_a_progressive_web_app)、[安装 PWA](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable)、[离线与后台运行](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Offline_and_background_operation)。
+运行 `npm run build` 后，通过 HTTPS 或 localhost 按构建路径访问 `dist/` 中各应用。在目标浏览器中先联网加载，再安装并断网重开，检查应用启动和本机数据访问。发布路径、部署和同步配置见[项目 README](../README.md)。

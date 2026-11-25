@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ChartNoAxesCombined, CircleCheck, History, RefreshCw, Settings2, TrendingUp } from 'lucide-react';
 import { readStored, saveStored } from '@pwa-apps/shared';
 import { bundledToken, downloadLedger, loadArchiveYears, missingTokenBoxMessage, SyncConflict, syncGithub, type SyncDirection } from './backup.ts';
 import { deleteTrade, emptyLedger, finishCycle, recordPrice, validateLedger, type Ledger, type OrderKind, type Stock, type TradePrice } from './domain.ts';
+import { createAlertCloud } from './alert-cloud.ts';
 import { Settings, type SyncConfig } from './pages.tsx';
 import { useQuotes } from './quotes.ts';
 import { Cycles, Transactions } from './transactions.tsx';
@@ -35,6 +36,7 @@ function App() {
     credential: readStored('stocks:cloud-passphrase', ''),
     secret: readStored('stocks:secret', ''),
   }));
+  const alertCloud = useMemo(() => createAlertCloud(config.credential), [config.credential]);
   const job = useRef(false);
   const checkedStartupSync = useRef(false);
   const channel = useRef<BroadcastChannel | undefined>(undefined);
@@ -215,11 +217,11 @@ function App() {
       {!local || !ledger ? <div className="panel muted">{feedback?.error
         ? <button onClick={() => void run(async () => setLocal(await readLocal()))}>重新读取数据</button>
         : '正在读取本机数据…'}</div> : <>
-        {tab === 'holdings' && <Watchlist ledger={ledger} busy={busy} add={saveStock} record={savePrice} endCycle={endCycle} removeTrade={removeTrade} remove={removeStock} market={market} syncConfig={config} />}
+        {tab === 'holdings' && <Watchlist ledger={ledger} busy={busy} add={saveStock} record={savePrice} endCycle={endCycle} removeTrade={removeTrade} remove={removeStock} market={market} alertCloud={alertCloud} />}
         {tab === 'trades' && <Transactions ledger={ledger} quotes={market.quotes} busy={busy} removeTrade={removeTrade}
           missingYears={local.archive?.missing} loadYears={loadYears} />}
         {tab === 'closed' && <Cycles ledger={ledger} quotes={market.quotes} busy={busy} missingYears={local.archive?.missing} loadYears={loadYears} />}
-        {tab === 'settings' && <Settings local={local} busy={busy} conflict={conflict}
+        {tab === 'settings' && <Settings alertCloud={alertCloud} local={local} busy={busy} conflict={conflict}
           config={config} setConfig={updateConfig} feedback={feedback?.area ? undefined : feedback}
           rulesFeedback={feedback?.area === 'rules' ? feedback : undefined}
           saveRules={rules => void change(current => ({ ...current, observationRules: rules }), { text: '观察规则已保存', area: 'rules' })}

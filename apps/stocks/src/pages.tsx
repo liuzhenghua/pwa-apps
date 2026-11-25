@@ -3,6 +3,8 @@ import { Cloud, Download, Upload } from 'lucide-react';
 import { bundledToken, missingTokenBoxMessage, repository, type SyncDirection } from './backup.ts';
 import { defaultObservationRules, validateObservationRules, type ObservationRules, type RuleMatch } from './domain.ts';
 import { dateLabel } from './format.ts';
+import { AlertManager } from './alert-sheet.tsx';
+import type { AlertCloud } from './alert-cloud.ts';
 import type { LocalState } from './store.ts';
 
 function RuleThreshold({ name, label, value }: {
@@ -78,8 +80,8 @@ function ObservationSettings({ rules, busy, save, feedback }: {
 }
 
 export type SyncConfig = { folder: string; credential: string; secret: string };
-export function Settings({ local, busy, conflict, config, setConfig, feedback, rulesFeedback, saveRules, sync, download, restore, clear }: {
-  local: LocalState; busy: boolean; conflict: boolean; config: SyncConfig; setConfig: (config: SyncConfig) => void; feedback?: { text: string; error?: boolean };
+export function Settings({ alertCloud, local, busy, conflict, config, setConfig, feedback, rulesFeedback, saveRules, sync, download, restore, clear }: {
+  alertCloud: AlertCloud; local: LocalState; busy: boolean; conflict: boolean; config: SyncConfig; setConfig: (config: SyncConfig) => void; feedback?: { text: string; error?: boolean };
   rulesFeedback?: { text: string; error?: boolean };
   saveRules: (rules: ObservationRules) => void;
   sync: (direction: SyncDirection) => void; download: () => void;
@@ -152,6 +154,7 @@ export function Settings({ local, busy, conflict, config, setConfig, feedback, r
         </>}
       </form>
     </dialog>
+    <AlertManager cloud={alertCloud} />
     <section className="panel">
       <h2>本机备份</h2>
       <p className="muted">清除浏览器数据可能导致记录丢失。导出的 JSON 包含股票和价格记录，请妥善保管。</p>
