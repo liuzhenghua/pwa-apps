@@ -31,6 +31,18 @@ function App() {
     }, 2800);
     return () => window.clearTimeout(timer);
   }, [feedback]);
+  useEffect(() => {
+    const root = document.documentElement;
+    const clearTouchFocus = () => root.removeAttribute('data-touch-focus');
+    const trackPointer = (event: PointerEvent) => root.toggleAttribute('data-touch-focus', event.pointerType === 'touch');
+    document.addEventListener('pointerdown', trackPointer, true);
+    document.addEventListener('keydown', clearTouchFocus, true);
+    return () => {
+      document.removeEventListener('pointerdown', trackPointer, true);
+      document.removeEventListener('keydown', clearTouchFocus, true);
+      clearTouchFocus();
+    };
+  }, []);
   const [config, setConfig] = useState<SyncConfig>(() => ({
     folder: readStored('stocks:sync-folder', ''),
     credential: readStored('stocks:cloud-passphrase', ''),
@@ -185,16 +197,26 @@ function App() {
   }
 
   useEffect(() => {
-    function requestForegroundSync() {
-      if (document.visibilityState === 'visible') setSyncRequest(request => request + 1);
+    function preloadAlerts() {
+      if (document.visibilityState === 'visible' && navigator.onLine) void alertCloud.refresh();
     }
+
+    function requestForegroundSync() {
+      if (document.visibilityState !== 'visible') return;
+      preloadAlerts();
+      setSyncRequest(request => request + 1);
+    }
+
+    // Sync settings are edited live, so avoid fetching for each intermediate value.
+    const preloadTimer = window.setTimeout(preloadAlerts, 250);
     document.addEventListener('visibilitychange', requestForegroundSync);
     window.addEventListener('online', requestForegroundSync);
     return () => {
+      window.clearTimeout(preloadTimer);
       document.removeEventListener('visibilitychange', requestForegroundSync);
       window.removeEventListener('online', requestForegroundSync);
     };
-  }, []);
+  }, [alertCloud]);
 
   useEffect(() => {
     if (handledSyncRequest.current === syncRequest || !local || busy || job.current || document.visibilityState !== 'visible') return;
@@ -272,7 +294,7 @@ function App() {
       <div>
         {(Object.keys(tabLabels) as Tab[]).map(item => {
           const Icon = tabIcons[item];
-          return <button key={item} type="button" disabled={busy} aria-current={tab === item ? 'page' : undefined}
+          return <button key={item} type="button" aria-current={tab === item ? 'page' : undefined}
             onClick={() => navigate(item)}><Icon size={19} />{tabLabels[item]}</button>;
         })}
       </div>

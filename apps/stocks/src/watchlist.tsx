@@ -377,12 +377,12 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
       <h2>持仓速览</h2>
       <ul>
         {cards.map(({ stock, name, latest, dayRate, dayTone, decision, cycle, idleComparison, recentEstimates, buyObservation }) => <li key={stock.id}>
-          <button type="button" onClick={() => {
+          <button type="button" onClick={event => {
             const card = document.getElementById('holding-' + stock.id);
             const details = card?.querySelector('details.cycle-position');
             if (details instanceof HTMLDetailsElement) details.open = true;
             card?.scrollIntoView({ block: 'start' });
-            card?.focus({ preventScroll: true });
+            if (event.detail === 0) card?.focus({ preventScroll: true });
           }}>
             <span className="decision-overview-copy">
               <span className="decision-overview-heading">

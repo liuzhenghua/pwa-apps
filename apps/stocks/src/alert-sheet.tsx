@@ -40,7 +40,7 @@ async function localEndpoint() {
 }
 
 export function AlertManager({ cloud, stock, close, context }: Props) {
-  const { state, error: loadError, loading, saving } = useSyncExternalStore(cloud.subscribe, cloud.snapshot);
+  const { state, alerts: storedAlerts, error: loadError, loading, saving } = useSyncExternalStore(cloud.subscribe, cloud.snapshot);
   const [deviceId, setDeviceId] = useState(() => localStorage.getItem(deviceKey) ?? '');
   const [notification, setNotification] = useState<{ endpoint?: string; denied: boolean }>();
   const [working, setWorking] = useState(false);
@@ -83,10 +83,7 @@ export function AlertManager({ cloud, stock, close, context }: Props) {
   }, [registration, state]);
 
   useEffect(() => {
-    const refresh = () => { void cloud.refresh(true); };
-    refresh();
-    window.addEventListener('focus', refresh);
-    return () => window.removeEventListener('focus', refresh);
+    if (navigator.onLine) void cloud.refresh();
   }, [cloud]);
 
   const pending = working || saving;
@@ -187,7 +184,8 @@ export function AlertManager({ cloud, stock, close, context }: Props) {
     setDraft({ target: { name: target.name, symbol: target.symbol }, kind: direction, original });
   }
 
-  const alerts = (account?.alerts ?? []).filter(alert => !stock || alert.symbol === stock.symbol);
+  const hasRules = Boolean(state) || storedAlerts !== undefined;
+  const alerts = (account?.alerts ?? storedAlerts ?? []).filter(alert => !stock || alert.symbol === stock.symbol);
   const content = <>
     {stock && <p className="muted">{stock.name} · {stock.symbol.slice(2)}</p>}
     {!stock && <div className="alert-device">
@@ -201,26 +199,27 @@ export function AlertManager({ cloud, stock, close, context }: Props) {
       <p className="muted">此设备有旧版提醒或通知绑定，可合并到 {cloud.account}。</p>
       <button type="button" disabled={pending} onClick={migrateLegacy}>合并旧提醒</button>
     </div>}
-    {state && (alerts.length ? <ul className="alert-list">
+    {hasRules && (alerts.length ? <ul className="alert-list">
       {alerts.map(alert => <li key={alert.id}>
         <div>
           {!stock && <strong className="alert-stock-name">{alert.name} · {alert.symbol.slice(2)}</strong>}
           <strong>{alert.kind === 'buy' ? '买入 ≤ ' : '卖出 ≥ '}{money(alert.price)}</strong>
           <span className="muted">{alert.triggeredAt ? '已触发' : '待触发'}</span>
         </div>
-        <button type="button" disabled={pending} aria-label={'编辑 ' + alert.name + ' ' + money(alert.price) + ' 提醒'}
+        <button type="button" disabled={pending || !state} aria-label={'编辑 ' + alert.name + ' ' + money(alert.price) + ' 提醒'}
           onClick={() => openForm(alert, alert.kind, alert)}>编辑</button>
-        {alert.triggeredAt && <button type="button" disabled={pending}
+        {alert.triggeredAt && <button type="button" disabled={pending || !state}
           onClick={() => {
             const id = crypto.randomUUID();
             void run(() => editAlerts(items => items.map(item => item.id === alert.id ?
               { ...item, id, triggeredAt: undefined, notifiedDevices: undefined } : item)), '已重新启用提醒');
           }}>重新启用</button>}
-        <button type="button" disabled={pending} aria-label={'移除 ' + alert.name + ' ' + money(alert.price) + ' 提醒'}
+        <button type="button" disabled={pending || !state} aria-label={'移除 ' + alert.name + ' ' + money(alert.price) + ' 提醒'}
           onClick={() => void run(() => editAlerts(items => items.filter(item => item.id !== alert.id)), '已移除提醒')}>移除</button>
       </li>)}
     </ul> : <p className="muted">{stock ? '这只股票还没有价格提醒。' : '还没有设置价格提醒。'}</p>)}
-    {!state && loading && <p className="muted" role="status">正在读取价格提醒…</p>}
+    {!hasRules && loading && <p className="muted" role="status">正在读取价格提醒…</p>}
+    {!state && hasRules && !loading && <p className="muted">显示上次读取的提醒。</p>}
     {loadError && <p className="form-message" role="alert">{loadError}</p>}
   </>;
   const feedback = error ? <p className="form-message" role="alert">{error}</p>

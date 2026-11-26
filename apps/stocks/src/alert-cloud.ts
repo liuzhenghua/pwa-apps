@@ -1,14 +1,29 @@
-import { openAlerts, requireAlerts, type AlertState } from './alerts.ts';
+import { readStored, saveStored } from '@pwa-apps/shared';
+import { alertAccount, openAlerts, requireAlerts, type AlertState, type PriceAlert } from './alerts.ts';
 import { bundledToken, missingTokenBoxMessage } from './backup.ts';
 
-type Snapshot = { state?: AlertState; error?: string; loading: boolean; saving: boolean };
+type Snapshot = { state?: AlertState; alerts?: PriceAlert[]; error?: string; loading: boolean; saving: boolean };
 const freshFor = 45_000;
+
+function readCachedAlerts(key: string): PriceAlert[] | undefined {
+  const cached = readStored<unknown>(key, undefined);
+  if (!Array.isArray(cached)) return;
+  return cached.filter(alert => typeof alert?.id === 'string' && typeof alert.symbol === 'string' &&
+    typeof alert.name === 'string' && (alert.kind === 'buy' || alert.kind === 'sell') &&
+    Number.isSafeInteger(alert.price) && alert.price > 0);
+}
 
 export function createAlertCloud(credential: string, folder: string) {
   const account = folder.trim();
   const setupError = !bundledToken ? missingTokenBoxMessage :
     !credential.trim() || !/^[A-Za-z0-9_-]{1,60}$/.test(account) ? '请先在同步配置中填写云端名字和访问口令。' : undefined;
-  let snapshot: Snapshot = { error: setupError, loading: false, saving: false };
+  const cacheKey = 'stocks:alert-rules:' + account;
+  let snapshot: Snapshot = {
+    alerts: setupError ? undefined : readCachedAlerts(cacheKey),
+    error: setupError,
+    loading: false,
+    saving: false,
+  };
   let loadedAt = 0;
   let generation = 0;
   let refresh: Promise<void> | undefined;
@@ -19,6 +34,17 @@ export function createAlertCloud(credential: string, folder: string) {
   function publish(changes: Partial<Snapshot>) {
     snapshot = { ...snapshot, ...changes };
     listeners.forEach(listener => listener());
+  }
+
+  function publishState(state: AlertState) {
+    const alerts = alertAccount(state, account).alerts;
+    const cachedAlerts = alerts.map(({ id, symbol, name, kind, price, triggeredAt }) =>
+      ({ id, symbol, name, kind, price, triggeredAt }));
+    try {
+      saveStored(cacheKey, cachedAlerts);
+    } catch { /* The live list is still available if local storage is disabled or full. */ }
+    loadedAt = Date.now();
+    publish({ state, alerts, error: undefined });
   }
 
   function connection() {
@@ -43,9 +69,7 @@ export function createAlertCloud(credential: string, folder: string) {
       const started = generation;
       refresh = connection().then(store => store.read()).then(({ data }) => {
         if (started !== generation) return;
-        const state = requireAlerts(data);
-        loadedAt = Date.now();
-        publish({ state });
+        publishState(requireAlerts(data));
       }).catch((reason: unknown) => {
         remote = undefined;
         if (started === generation) publish({ error: reason instanceof Error ? reason.message : '无法读取价格提醒' });
@@ -63,8 +87,7 @@ export function createAlertCloud(credential: string, folder: string) {
         const store = await connection();
         const state = await store.update(current => change(requireAlerts(current)), previousName ? [previousName] : undefined);
         generation++;
-        loadedAt = Date.now();
-        publish({ state, error: undefined });
+        publishState(state);
       } catch (reason) {
         remote = undefined;
         throw reason;

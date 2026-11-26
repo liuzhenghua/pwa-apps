@@ -38,6 +38,8 @@ button, .button {
 button:hover:not(:disabled), .button:hover { border-color: #8da9d7; background: #f4f7ff; }
 button:disabled, .button.disabled { opacity: .55; cursor: default; }
 :focus-visible { outline: 2px solid #2b67e8; outline-offset: 3px; }
+:root[data-touch-focus] :is(button, summary, .watch-card):focus { outline: none; }
+:is(button, summary, .button) { -webkit-tap-highlight-color: transparent; }
 .primary { background: var(--blue); border-color: var(--blue); color: white; }
 .primary:hover:not(:disabled) { background: #164ab8; border-color: #164ab8; }
 .tinted { background: #eaf1ff; color: #134db8; border-color: #e1ebff; }
