@@ -55,7 +55,7 @@ export type ObservationRules = {
 };
 export const defaultObservationRules: Required<ObservationRules> = {
   activeBuyDrop: 1, activeBuyDropFromBuy: 2, idleBuyDrop: 2,
-  sellAboveAverage: 2, sellAboveLastBuy: 1, sellMatch: 'any',
+  sellAboveAverage: 2, sellAboveLastBuy: 2, sellMatch: 'any',
 };
 
 export function validateObservationRules(rules: ObservationRules): ObservationRules {

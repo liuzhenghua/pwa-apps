@@ -38,7 +38,8 @@ function App() {
   }));
   const alertCloud = useMemo(() => createAlertCloud(config.credential, config.folder), [config.credential, config.folder]);
   const job = useRef(false);
-  const checkedStartupSync = useRef(false);
+  const [syncRequest, setSyncRequest] = useState(1);
+  const handledSyncRequest = useRef(0);
   const channel = useRef<BroadcastChannel | undefined>(undefined);
 
   useEffect(() => {
@@ -163,7 +164,7 @@ function App() {
     } catch { /* Settings remain available for this session. */ }
   }
 
-  function synchronize(direction: SyncDirection, startup = false) {
+  function synchronize(direction: SyncDirection, automatic = false) {
     if (!local) return;
     void run(async () => {
       if (!bundledToken) throw Error(missingTokenBoxMessage);
@@ -177,15 +178,27 @@ function App() {
       setLocal(result.local);
       channel.current?.postMessage('update');
       setConflict(false);
-      if (!startup || result.message !== '本机与云端已同步') {
-        setFeedback({ text: result.message, area: startup ? 'startup-sync' : undefined });
+      if (!automatic || result.message !== '本机与云端已同步') {
+        setFeedback({ text: result.message, area: automatic ? 'startup-sync' : undefined });
       }
     });
   }
 
   useEffect(() => {
-    if (!local || checkedStartupSync.current) return;
-    checkedStartupSync.current = true;
+    function requestForegroundSync() {
+      if (document.visibilityState === 'visible') setSyncRequest(request => request + 1);
+    }
+    document.addEventListener('visibilitychange', requestForegroundSync);
+    window.addEventListener('online', requestForegroundSync);
+    return () => {
+      document.removeEventListener('visibilitychange', requestForegroundSync);
+      window.removeEventListener('online', requestForegroundSync);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (handledSyncRequest.current === syncRequest || !local || busy || job.current || document.visibilityState !== 'visible') return;
+    handledSyncRequest.current = syncRequest;
     if (bundledToken && navigator.onLine && config.folder.trim() && config.credential.trim() && config.secret) {
       synchronize('auto', true);
     }

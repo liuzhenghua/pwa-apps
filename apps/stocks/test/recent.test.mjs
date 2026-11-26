@@ -137,18 +137,18 @@ test('sell observation prefers the whole cycle above average and otherwise uses 
     { ...entry(1200, 32), kind: 'buy', quantity: 200 },
   ];
   const position = cycleResult(history);
-  assert.equal(sellObservation(position, 1009), undefined);
-  assert.deepEqual(sellObservation(position, 1010), { scope: 'lowest-buy', quantity: 200 });
+  assert.equal(sellObservation(position, 1019), undefined);
+  assert.deepEqual(sellObservation(position, 1020), { scope: 'lowest-buy', quantity: 200 });
   assert.deepEqual(sellObservation(position, 1121), { scope: 'lowest-buy', quantity: 200 });
   assert.deepEqual(sellObservation(position, 1122), { scope: 'all', quantity: 400 });
   const olderCheapest = cycleResult([
     { ...entry(1200, 33), kind: 'buy', quantity: 300 },
     { ...entry(1000, 32), kind: 'buy', quantity: 100 },
   ]);
-  assert.deepEqual(sellObservation(olderCheapest, 1010), { scope: 'lowest-buy', quantity: 100 });
+  assert.deepEqual(sellObservation(olderCheapest, 1020), { scope: 'lowest-buy', quantity: 100 });
   const partial = cycleResult([{ ...entry(1000, 34), kind: 'sell', quantity: 350 }, ...history]);
   assert.deepEqual(partial.remainingBuyLots[0], { ...entry(1200, 32), quantity: 50 });
-  assert.equal(sellObservation(partial, 1010), undefined);
+  assert.equal(sellObservation(partial, 1020), undefined);
   assert.deepEqual(sellObservation(partial, 1224), { scope: 'all', quantity: 50 });
 });
 
@@ -163,7 +163,7 @@ test('buy observation uses the last sell and sell observation combines its confi
     { ...entry(1000, 33), kind: 'buy', quantity: 200 },
     { ...entry(1200, 32), kind: 'buy', quantity: 200 },
   ]);
-  assert.equal(sellObservation(mixed, 1010, { ...defaultObservationRules, sellMatch: 'all' }), undefined);
+  assert.equal(sellObservation(mixed, 1020, { ...defaultObservationRules, sellMatch: 'all' }), undefined);
   assert.deepEqual(sellObservation(mixed, 1122, { ...defaultObservationRules, sellMatch: 'all' }), { scope: 'all', quantity: 400 });
   assert.equal(sellObservation(mixed, 1111, { ...defaultObservationRules, sellAboveAverage: 2, sellAboveLastBuy: 15 }), undefined);
 });

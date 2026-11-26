@@ -310,6 +310,7 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
   }
 
   const addMode = editor?.type === 'add';
+  const lockEditor = busy && editor?.type !== 'stock' && editor?.type !== 'alerts';
   const detail = editor?.type === 'detail' ? editor : undefined;
   const editorSymbol = editor && editor.type !== 'add' ? symbolFor(editor.stock) : undefined;
   const editorQuote = editorSymbol ? quotes.get(editorSymbol) : undefined;
@@ -418,9 +419,9 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
           <div className="watch-heading">
             <div><h2>{name}</h2><p className="muted">{stock.market} · {stock.code}</p></div>
             <div className="watch-heading-actions">
-              <button type="button" className="icon-button stock-detail-button" aria-label={name + '价格提醒'} title="价格提醒" disabled={busy}
+              <button type="button" className="icon-button stock-detail-button" aria-label={name + '价格提醒'} title="价格提醒"
                 onClick={() => open({ type: 'alerts', stock })}><Bell size={18} aria-hidden="true" /></button>
-              <button type="button" className="icon-button stock-detail-button" aria-label={name + '详情'} title="股票详情" disabled={busy}
+              <button type="button" className="icon-button stock-detail-button" aria-label={name + '详情'} title="股票详情"
                 onClick={() => open({ type: 'stock', stock })}><Info size={18} aria-hidden="true" /></button>
             </div>
           </div>
@@ -471,12 +472,12 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
       })}
     </div>
     <dialog ref={dialog} className={editor && !addMode ? 'sync-dialog entry-sheet' : 'sync-dialog'} aria-labelledby="watch-editor-title" data-side={stockDetail ? 'stock' : detail ? 'detail' : editor?.type === 'record' ? editor.kind : editor?.type}
-      onClose={() => setEditor(undefined)} onCancel={event => { if (busy) event.preventDefault(); }}
+      onClose={() => setEditor(undefined)} onCancel={event => { if (lockEditor) event.preventDefault(); }}
       onPointerDown={event => { pressedBackdrop.current = event.button === 0 && isBackdropPress(event); }}
       onClick={event => {
         const tappedBackdrop = pressedBackdrop.current && event.detail > 0 && isBackdropPress(event);
         pressedBackdrop.current = false;
-        if (!addMode && !busy && tappedBackdrop) event.currentTarget.close();
+        if (!addMode && !lockEditor && tappedBackdrop) event.currentTarget.close();
       }}>
       {editor?.type === 'alerts' ? <AlertManager cloud={alertCloud} stock={{ symbol: symbolFor(editor.stock), name: editorQuote?.name ?? editor.stock.name }}
         context={{
@@ -492,7 +493,7 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
         : editor && <form onSubmit={event => void submit(event)}>
         <div className="section-title editor-heading">
           <h2 id="watch-editor-title">{editor.type === 'add' ? '添加股票' : editor.type === 'stock' ? '股票详情' : detail ? sideLabels[detail.kind] + (detail.index + 1) + '详情' : '记录' + sideLabels[editor.kind] + '价'}</h2>
-          <button type="button" disabled={busy} onClick={() => dialog.current?.close()}>关闭</button>
+          <button type="button" disabled={lockEditor} onClick={() => dialog.current?.close()}>关闭</button>
         </div>
         <div className="editor-content">
           {editor.type !== 'add' && <p className="muted">{editorQuote?.name ?? editor.stock.name} · {editor.stock.code}</p>}
