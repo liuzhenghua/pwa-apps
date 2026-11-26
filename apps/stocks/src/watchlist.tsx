@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from 're
 import { Bell, ChevronRight, Info, Plus, RefreshCw } from 'lucide-react';
 import { AlertManager } from './alert-sheet.tsx';
 import type { AlertCloud } from './alert-cloud.ts';
-import { activeCycle, average, cents, compareSellPrice, cycleResult, buyObservationMatches, defaultObservationRules, percent, reachesBuyObservation, recentPrices, sellObservation, sum, shares, sharesForAmount, shareStep, sameTrade, tradePrices, type Ledger, type ObservationRules, type OrderKind, type PriceRecord, type Stock, type TradePrice } from './domain.ts';
+import { activeCycle, average, cents, compareSellPrice, cycleResult, buyObservationMatches, defaultObservationRules, lowestRemainingBuy, percent, reachesBuyObservation, recentPrices, sellObservation, sum, shares, sharesForAmount, shareStep, sameTrade, tradePrices, type Ledger, type ObservationRules, type OrderKind, type PriceRecord, type Stock, type TradePrice } from './domain.ts';
 import { money, tradeDateLabel } from './format.ts';
 import { symbolFor, useQuotes, type Quote } from './quotes.ts';
 
@@ -96,7 +96,7 @@ function latestRecordedTrade(history: TradePrice[], kind: OrderKind, cached?: Pr
   return loaded && (!cached || loaded.time >= cached.time) ? loaded : cached;
 }
 
-function priceEstimate(quote?: Quote, reference?: PriceRecord, kind: OrderKind = 'buy') {
+function priceEstimate(quote?: Quote, reference?: PriceRecord, kind: OrderKind = 'buy', referenceLabel = kind === 'buy' ? '上次买入' : '上次卖出') {
   const quantity = reference?.quantity;
   if (!quote || !reference || quantity === undefined) return;
   const cost = quote.price * quantity;
@@ -105,7 +105,7 @@ function priceEstimate(quote?: Quote, reference?: PriceRecord, kind: OrderKind =
   if (!Number.isSafeInteger(cost) || !Number.isSafeInteger(difference)) return;
   const tone = difference > 0 ? 'gain' : difference < 0 ? 'loss' : '';
   const rate = Math.abs(percent(quote.price - reference.price, reference.price)).toFixed(2);
-  const impact = difference === 0 ? '与上次' + (buy ? '买入' : '卖出') + '同价' :
+  const impact = difference === 0 ? '与' + referenceLabel + '同价' :
     (difference > 0 ? (buy ? '省 ' : '多 ') : (buy ? '贵 ' : '少 ')) + money(Math.abs(difference));
   const impactRate = difference === 0 ? '' : rate + '%';
   return { quantity, cost, impact, impactRate, tone, kind };
@@ -124,7 +124,8 @@ function cycleDecision(history: TradePrice[], quote: Quote | undefined, lastSell
   try {
     const result = cycleResult(history);
     const quantity = result.unmatchedKind === 'buy' ? result.unmatched : 0;
-    if (!quote) return { result, quantity, headline: '等待最新报价', tone: '' };
+    const lowestLot = lowestRemainingBuy(result);
+    if (!quote) return { result, quantity, lowestLot, headline: '等待最新报价', tone: '' };
 
     const profit = quantity ? sum([quote.price * quantity, -result.remainingBuyCost]) : undefined;
     const profitRate = profit === undefined ? undefined : percent(profit, result.remainingBuyCost);
@@ -138,14 +139,11 @@ function cycleDecision(history: TradePrice[], quote: Quote | undefined, lastSell
     ].filter(Boolean).join(' · ');
     const estimate = priceEstimate(quote, latestBuy);
     const sellSignal = sellObservation(result, quote.price, rules);
-    const partialSell = sellSignal?.scope === 'last-buy';
     const headline = sellSignal ? '卖出观察' : buyObservation ? '' : '观望';
-    const sellImpact = profit === undefined || profitRate === undefined ? '' :
-      signedMoney(profit);
-    const headlineMetric = sellSignal?.scope === 'all' ? '全卖 ' + signedRate(profitRate!) :
-      partialSell ? '最近剩余批次 ' + number.format(sellSignal.quantity) + ' 股 · ' + priceComparison('剩余买价', quote.price, result.remainingBuyLots[0]) : '';
+    const lowestSale = priceEstimate(quote, lowestLot, 'sell', '买价');
+    const headlineMetric = sellSignal?.scope === 'all' ? '全卖 ' + signedRate(profitRate!) : '';
     return {
-      result, quantity, profit, profitRate, estimate, buyObservation, headline, headlineMetric, sellImpact, sellImpactRate: sellSignal?.scope !== 'all' && profitRate !== undefined ? signedRate(profitRate) : '',
+      result, quantity, profit, profitRate, estimate, buyObservation, headline, headlineMetric, lowestLot, lowestSale,
       labelTone: sellSignal ? 'gain' : 'neutral',
       tone: profit ? (profit > 0 ? 'gain' : 'loss') : '',
     };
@@ -165,12 +163,11 @@ function DecisionSignals({ decision }: { decision: NonNullable<ReturnType<typeof
 }
 
 function DecisionImpacts({ decision }: { decision: NonNullable<ReturnType<typeof cycleDecision>> }) {
-  const { sellImpact, sellImpactRate, estimate, tone } = decision;
-  if (!sellImpact && !estimate) return null;
+  const { lowestSale, estimate } = decision;
+  if (!lowestSale && !estimate) return null;
 
   return <span className="decision-impacts">
-    {sellImpact && <span className="decision-impact"><span>全卖预计</span><strong className={'decision-impact-values ' + tone}><span>{sellImpact}</span>
-      {sellImpactRate && <span><span aria-hidden="true">· </span>{sellImpactRate}</span>}</strong></span>}
+    {lowestSale && <PriceImpact estimate={lowestSale} />}
     {estimate && <PriceImpact estimate={estimate} />}
   </span>;
 }
@@ -183,7 +180,7 @@ function RecentTradeImpacts({ estimates }: { estimates: NonNullable<ReturnType<t
 
 function CyclePosition({ decision }: { decision: ReturnType<typeof cycleDecision> }) {
   if (!decision) return <p className="muted">本周期金额或股数超出可计算范围。</p>;
-  const { result, quantity, profit, profitRate, estimate } = decision;
+  const { result, quantity, profit, profitRate, estimate, lowestLot } = decision;
   return <details className="cycle-position" aria-label="本周期持仓与买价比较">
     <summary>
       <span className="decision-title">
@@ -193,8 +190,8 @@ function CyclePosition({ decision }: { decision: ReturnType<typeof cycleDecision
       <DecisionImpacts decision={decision} />
     </summary>
     <p className="decision-current">{quantity ? '剩余均价 ¥' + average(result.remainingBuyCost, quantity) : '本周期无剩余买入股数'}</p>
-    {result.remainingBuyLots[0] && <p className="muted">
-      最近剩余批次 {money(result.remainingBuyLots[0].price)} · {number.format(result.remainingBuyLots[0].quantity)} 股
+    {lowestLot && <p className="muted">
+      最低买价批次 {money(lowestLot.price)} · {number.format(lowestLot.quantity)} 股
     </p>}
     <div className="decision-outcomes">
       <div>

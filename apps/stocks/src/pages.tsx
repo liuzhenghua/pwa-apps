@@ -65,9 +65,9 @@ function ObservationSettings({ rules, busy, save, feedback }: {
     <fieldset disabled={busy}>
       <legend>卖出观察</legend>
       <RuleThreshold name="sellAboveAverage" label="全卖 · 高于剩余均价" value={rules.sellAboveAverage} />
-      <RuleThreshold name="sellAboveLastBuy" label="高于最近剩余批次买价" value={rules.sellAboveLastBuy} />
+      <RuleThreshold name="sellAboveLastBuy" label="高于剩余最低买入价" value={rules.sellAboveLastBuy} />
       <RuleMode name="sellMatch" label="卖出触发条件" value={rules.sellMatch} />
-      <p className="muted">满足全卖门槛时提示全部剩余股数，否则提示最近一笔仍有剩余的买入批次。</p>
+      <p className="muted">两条都满足时提示全卖。选「任一满足」时，只达到最低买价门槛就提示该批次的剩余股数。</p>
     </fieldset>
     {error && <p className="form-message" role="alert">{error}</p>}
     <div className="actions">

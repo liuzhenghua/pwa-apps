@@ -49,6 +49,7 @@ export type ObservationRules = {
   activeBuyDropFromBuy?: number;
   idleBuyDrop: number;
   sellAboveAverage: number;
+  // Keep the persisted key so existing observation settings retain their threshold.
   sellAboveLastBuy: number;
   sellMatch: RuleMatch;
 };
@@ -513,15 +514,20 @@ export function buyObservationMatches(price: number, lastSell: PriceRecord | und
   return !!lastSell && reachesBuyObservation(price, lastSell.price, active ? rules.activeBuyDrop : rules.idleBuyDrop);
 }
 
+export function lowestRemainingBuy(position: ReturnType<typeof cycleResult>) {
+  return position.remainingBuyLots.reduce<(typeof position.remainingBuyLots)[number] | undefined>((lowest, lot) =>
+    !lowest || lot.price < lowest.price ? lot : lowest, undefined);
+}
+
 export function sellObservation(position: ReturnType<typeof cycleResult>, price: number, rules: ObservationRules = defaultObservationRules) {
   if (position.unmatchedKind !== 'buy') return;
   const marketValue = decimal(price).times(position.unmatched);
   const whole = marketValue.times(100).gte(decimal(position.remainingBuyCost).times(decimal(100).plus(rules.sellAboveAverage)));
-  const lot = position.remainingBuyLots[0];
-  const last = lot && decimal(price).times(100).gte(decimal(lot.price).times(decimal(100).plus(rules.sellAboveLastBuy)));
-  if (rules.sellMatch === 'all' && !(whole && last)) return;
+  const lot = lowestRemainingBuy(position);
+  const lowest = lot && decimal(price).times(100).gte(decimal(lot.price).times(decimal(100).plus(rules.sellAboveLastBuy)));
+  if (rules.sellMatch === 'all' && !(whole && lowest)) return;
   if (whole) return { scope: 'all' as const, quantity: position.unmatched };
-  if (last) return { scope: 'last-buy' as const, quantity: lot.quantity };
+  if (lowest) return { scope: 'lowest-buy' as const, quantity: lot.quantity };
 }
 
 function validatePriceRecord(record: PriceRecord) {

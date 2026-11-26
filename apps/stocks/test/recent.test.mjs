@@ -131,16 +131,21 @@ test('buy observation begins at a 1% price drop from the last fill', () => {
   assert.equal(reachesBuyObservation(2400, 2424), false);
 });
 
-test('sell observation prefers the whole cycle above average and otherwise uses the latest unsold buy', () => {
+test('sell observation prefers the whole cycle above average and otherwise uses the cheapest unsold buy', () => {
   const history = [
     { ...entry(1000, 33), kind: 'buy', quantity: 200 },
     { ...entry(1200, 32), kind: 'buy', quantity: 200 },
   ];
   const position = cycleResult(history);
   assert.equal(sellObservation(position, 1009), undefined);
-  assert.deepEqual(sellObservation(position, 1010), { scope: 'last-buy', quantity: 200 });
-  assert.deepEqual(sellObservation(position, 1121), { scope: 'last-buy', quantity: 200 });
+  assert.deepEqual(sellObservation(position, 1010), { scope: 'lowest-buy', quantity: 200 });
+  assert.deepEqual(sellObservation(position, 1121), { scope: 'lowest-buy', quantity: 200 });
   assert.deepEqual(sellObservation(position, 1122), { scope: 'all', quantity: 400 });
+  const olderCheapest = cycleResult([
+    { ...entry(1200, 33), kind: 'buy', quantity: 300 },
+    { ...entry(1000, 32), kind: 'buy', quantity: 100 },
+  ]);
+  assert.deepEqual(sellObservation(olderCheapest, 1010), { scope: 'lowest-buy', quantity: 100 });
   const partial = cycleResult([{ ...entry(1000, 34), kind: 'sell', quantity: 350 }, ...history]);
   assert.deepEqual(partial.remainingBuyLots[0], { ...entry(1200, 32), quantity: 50 });
   assert.equal(sellObservation(partial, 1010), undefined);
