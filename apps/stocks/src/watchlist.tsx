@@ -114,6 +114,18 @@ type ObservationRow = {
   action: string; basis: string; quantity?: number; rate: number; totalChange?: number; matched: boolean; boughtAfterSell?: boolean;
 };
 
+function comparisonRate(row: ObservationRow) {
+  const change = row.totalChange || row.rate;
+  if (!change) return { text: '持平', tone: undefined };
+  const higher = change > 0;
+  const buy = row.action === '买';
+  const direction = buy ? (higher ? '贵' : '省') : (higher ? '多' : '少');
+  return {
+    text: direction + ' ' + Math.abs(row.rate).toFixed(2) + '%',
+    tone: higher !== buy ? 'gain' : 'loss',
+  };
+}
+
 function buyComparisonRow(price: number, trade: PriceRecord, basis: string, matched = false): ObservationRow {
   const difference = price - trade.price;
   return {
@@ -125,15 +137,18 @@ function buyComparisonRow(price: number, trade: PriceRecord, basis: string, matc
 function ObservationRows({ rows }: { rows: ObservationRow[] }) {
   if (!rows.length) return null;
   return <span className="overview-rules">
-    {rows.map(row => <span className={'overview-rule' + (row.matched ? ' matched' : '')} key={row.action + row.basis}>
-      <span className="overview-rule-action">{row.boughtAfterSell ? '卖出后已买入' : row.action + ' ' + (row.quantity === undefined ? '股数未知' : number.format(row.quantity) + ' 股')}</span>
-      <span className="overview-rule-basis">较{row.basis}</span>
-      <strong className={row.matched ? row.rate > 0 ? 'gain' : 'loss' : undefined}>
-        {row.matched && <span className="sr-only">已达标 </span>}
-        {signedRate(row.rate)}
-        {row.totalChange !== undefined && Number.isSafeInteger(row.totalChange) && <span> · {money(Math.abs(row.totalChange))}</span>}
-      </strong>
-    </span>)}
+    {rows.map(row => {
+      const { text, tone } = comparisonRate(row);
+      return <span className={'overview-rule' + (row.matched ? ' matched' : '')} key={row.action + row.basis}>
+        <span className="overview-rule-action">{row.boughtAfterSell ? '卖出后已买入' : row.action + ' ' + (row.quantity === undefined ? '股数未知' : number.format(row.quantity) + ' 股')}</span>
+        <span className="overview-rule-basis">较{row.basis}</span>
+        <strong className={tone}>
+          {row.matched && <span className="sr-only">已达标 </span>}
+          {text}
+          {row.totalChange !== undefined && row.totalChange !== 0 && Number.isSafeInteger(row.totalChange) && <span> · {money(Math.abs(row.totalChange))}</span>}
+        </strong>
+      </span>;
+    })}
   </span>;
 }
 
@@ -152,7 +167,7 @@ function observationRows(quote: Quote | undefined, buyRow: ObservationRow | unde
       ) : undefined;
       const sellsAll = latestLot?.quantity === decision.quantity;
       if (latestLot) rows.unshift({
-        action: '卖', basis: '周期最近成交（买）', quantity: latestLot.quantity,
+        action: '卖', basis: '最近成交（买）', quantity: latestLot.quantity,
         rate: percent(price - latestLot.price, latestLot.price), totalChange: (price - latestLot.price) * latestLot.quantity,
         matched: sellsAll ? !!decision.sellObservation : latestLot === lot && !!lowest,
       });
@@ -343,7 +358,7 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
     const hasCycle = cycle.length > 0;
     const buyMatched = !!quote && buyObservationMatches(quote.price, reference, hasCycle, rules, lastRecordedBuy);
     const buyRow = quote && reference ? {
-      ...buyComparisonRow(quote.price, reference, recentTrade ? '周期最近成交（' + sideLabels[recentTrade.kind] + '）' : '最近卖价', buyMatched),
+      ...buyComparisonRow(quote.price, reference, recentTrade ? '最近成交（' + sideLabels[recentTrade.kind] + '）' : '最近卖价', buyMatched),
       boughtAfterSell: !hasCycle && boughtAfterSell(reference, lastRecordedBuy),
     } : undefined;
     const decision = cycleDecision(cycle, quote, buyMatched, rules);
@@ -351,10 +366,10 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
     const primaryRows = recentTrade?.kind === 'buy' ? comparisons.filter(row => row !== buyRow) : comparisons;
     const primary = primaryRows[0];
     const oppositeTrade = recentTrade?.kind === 'buy' ? latestTrade(cycle, 'sell') : lastRecordedBuy;
-    const supplement = quote && primary && oppositeTrade && (primary === buyRow || primary.basis.startsWith('周期最近成交'))
+    const supplement = quote && primary && oppositeTrade && (primary === buyRow || primary.basis.startsWith('最近成交'))
       ? {
         ...buyComparisonRow(quote.price, { ...oppositeTrade, quantity: primary.quantity },
-          recentTrade?.kind === 'buy' ? '周期最近卖出' : '最近买入'),
+          recentTrade?.kind === 'buy' ? '最近卖出' : '最近买入'),
         action: primary.action,
       }
       : undefined;
