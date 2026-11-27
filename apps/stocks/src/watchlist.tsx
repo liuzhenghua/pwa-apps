@@ -348,20 +348,20 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
     } : undefined;
     const decision = cycleDecision(cycle, quote, buyMatched, rules);
     const comparisons = observationRows(quote, buyRow, decision, rules, recentTrade);
-    const rows = recentTrade?.kind === 'buy' ? comparisons.filter(row => row !== buyRow) : comparisons;
-    const primary = rows[0];
+    const primaryRows = recentTrade?.kind === 'buy' ? comparisons.filter(row => row !== buyRow) : comparisons;
+    const primary = primaryRows[0];
     const oppositeTrade = recentTrade?.kind === 'buy' ? latestTrade(cycle, 'sell') : lastRecordedBuy;
-    const supplement = quote && primary && oppositeTrade && recentTrade && primary.basis.startsWith('周期最近成交')
+    const supplement = quote && primary && oppositeTrade && (primary === buyRow || primary.basis.startsWith('周期最近成交'))
       ? {
         ...buyComparisonRow(quote.price, { ...oppositeTrade, quantity: primary.quantity },
-          recentTrade.kind === 'buy' ? '周期最近卖出' : '最近买入'),
+          recentTrade?.kind === 'buy' ? '周期最近卖出' : '最近买入'),
         action: primary.action,
       }
       : undefined;
-    const cardRows = supplement ? [...comparisons.slice(0, 1), supplement, ...rows.slice(1)] : rows;
+    const rows = supplement ? [primary, supplement, ...primaryRows.slice(1)] : primaryRows;
     const idleBuyObservation = !hasCycle && buyMatched;
     return {
-      stock, symbol, quote, dayChange, dayRate, dayTone, history, cycle, rows, cardRows, idleBuyObservation,
+      stock, symbol, quote, dayChange, dayRate, dayTone, history, cycle, rows, idleBuyObservation,
       name: quote?.name ?? stock.name,
       decision, lastRecordedBuy, lastRecordedSell,
     };
@@ -407,7 +407,7 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
       <p className="muted">各行百分比按对应参考价计算，未扣手续费。</p>
     </section>}
     <div className="stock-grid">
-      {cards.map(({ stock, symbol, quote, dayChange, dayRate, dayTone, history, cycle, name, decision, cardRows, idleBuyObservation }) => {
+      {cards.map(({ stock, symbol, quote, dayChange, dayRate, dayTone, history, cycle, name, decision, rows, idleBuyObservation }) => {
         const lastEnded = stock.cycles?.at(-1);
         const counts = { buy: 0, sell: 0 };
         const trades = [...cycle].sort((a, b) => Date.parse(b.time) - Date.parse(a.time))
@@ -435,7 +435,7 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
             <span className="muted">{quote ? '腾讯财经 · ' + quoteTime.format(new Date(quote.time)) + (missing.has(symbol) ? ' · 更新失败' : '') : missing.has(symbol) ? '行情暂不可用' : '等待报价'}</span>
           </div>
           {cycle.length > 0 ? <>
-            <CyclePosition decision={decision} rows={cardRows} hasQuote={!!quote} />
+            <CyclePosition decision={decision} rows={rows} hasQuote={!!quote} />
             <div className="cycle-trade-heading">
               <h3>本周期成交</h3>
               <span className="muted">买入 {counts.buy} 笔 · 卖出 {counts.sell} 笔</span>
@@ -447,11 +447,11 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
             </details>}
           </> : <>
             <p className="muted watch-cycle-count">暂无进行中的周期</p>
-            {cardRows.length > 0 && <div className="cycle-position">
+            {rows.length > 0 && <div className="cycle-position">
               <span className="decision-title">
                 <PositionIndicators hasQuote={!!quote} hasCycle={false} idleBuyObservation={idleBuyObservation} />
               </span>
-              <ObservationRows rows={cardRows} />
+              <ObservationRows rows={rows} />
             </div>}
           </>}
           {!cycle.length && lastEnded && <PreviousCycle endedAt={lastEnded.endedAt}
