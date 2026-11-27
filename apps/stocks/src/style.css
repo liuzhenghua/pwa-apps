@@ -150,7 +150,8 @@ td small { margin-top: 2px; }
 
 .watch-heading button { color: var(--muted); }
 .watch-quote { display: grid; gap: 4px; background: #edf3ff; border-radius: 9px; padding: 10px 12px; margin: 13px 0; }
-.watch-quote strong { font-size: var(--text-display); color: var(--navy); font-variant-numeric: tabular-nums; }
+.watch-quote strong { font-size: var(--text-display); font-variant-numeric: tabular-nums; }
+.watch-quote strong:where(:not(.gain, .loss)) { color: var(--navy); }
 .watch-quote-values { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .watch-day-change { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 3px 6px; font-size: var(--text-body); font-weight: 600; font-variant-numeric: tabular-nums; }
 .watch-day-change .muted { font-weight: 400; }

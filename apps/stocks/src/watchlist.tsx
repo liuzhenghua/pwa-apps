@@ -409,7 +409,7 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
                 </span>
                 {quote && <span className="decision-overview-quote">
                   {missing.has(symbol) && <span className="muted">上次报价</span>}
-                  <strong aria-label={(missing.has(symbol) ? '上次报价 ' : '最新价 ') + money(quote.price)}>{money(quote.price)}</strong>
+                  <strong className={dayTone} aria-label={(missing.has(symbol) ? '上次报价 ' : '最新价 ') + money(quote.price)}>{money(quote.price)}</strong>
                   {dayRate !== undefined && <span className={dayTone} aria-label={'当日涨跌幅 ' + signedRate(dayRate)}>{signedRate(dayRate)}</span>}
                 </span>}
               </span>
@@ -442,7 +442,7 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
           <div className="watch-quote">
             <span className="muted">{quote && missing.has(symbol) ? '上次报价' : '最新价'}</span>
             <div className="watch-quote-values">
-              <strong>{quote ? money(quote.price) : '—'}</strong>
+              <strong className={dayTone}>{quote ? money(quote.price) : '—'}</strong>
               {dayChange !== undefined && dayRate !== undefined && <span className={'watch-day-change ' + dayTone} aria-label={'当日涨跌 ' + signedMoney(dayChange) + ' ' + signedRate(dayRate)}>
                 <span className="muted">当日</span><span>{signedMoney(dayChange)}</span><span>{signedRate(dayRate)}</span>
               </span>}
