@@ -2,13 +2,16 @@ import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from 're
 import { Bell, ChevronRight, Info, Plus, RefreshCw } from 'lucide-react';
 import { AlertManager } from './alert-sheet.tsx';
 import type { AlertCloud } from './alert-cloud.ts';
-import { activeCycle, average, cents, compareSellPrice, cycleResult, buyObservationMatches, defaultObservationRules, lowestRemainingBuy, percent, reachesBuyObservation, recentPrices, sellObservation, sum, shares, sharesForAmount, shareStep, sameTrade, tradePrices, type Ledger, type ObservationRules, type OrderKind, type PriceRecord, type Stock, type TradePrice } from './domain.ts';
+import { activeCycle, cents, compareSellPrice, cycleResult, boughtAfterSell, buyObservationMatches, defaultObservationRules, latestTrade, percent, recentPrices, sellObservation, sellObservationConditions, sum, shares, sharesForAmount, shareStep, sameTrade, tradePrices, type Ledger, type ObservationRules, type OrderKind, type PriceRecord, type Stock, type TradePrice } from './domain.ts';
 import { money, tradeDateLabel } from './format.ts';
 import { symbolFor, useQuotes, type Quote } from './quotes.ts';
 
 const quickAmounts = [5_000, 10_000, 15_000, 20_000];
 const number = new Intl.NumberFormat('zh-CN');
 const sideLabels = { buy: '买', sell: '卖' };
+const cycleTradeDate = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric',
+});
 const quoteTime = new Intl.DateTimeFormat('zh-CN', {
   timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
 });
@@ -35,21 +38,23 @@ function isBackdropPress(event: MouseEvent<HTMLDialogElement>): boolean {
   return event.clientX < left || event.clientX >= right || event.clientY < top || event.clientY >= bottom;
 }
 
-function PriceSide({ kind, records, open }: {
-  kind: OrderKind;
-  records: PriceRecord[];
-  open: (entry: PriceRecord, index: number) => void;
+type CycleEntry = { trade: TradePrice; sideIndex: number };
+
+function CycleTradeList({ entries, open, label }: {
+  entries: CycleEntry[];
+  open: (entry: CycleEntry) => void;
+  label: string;
 }) {
-  const label = sideLabels[kind];
-  return <ol className="price-side" aria-label={kind === 'buy' ? '周期内买入' : '周期内卖出'}>
-    {records.slice(0, 3).map((entry, index) => {
-      const title = label + (index + 1);
-      return <li key={index}><button type="button" className="price-row"
-        aria-label={title + '详情'} onClick={() => open(entry, index)}>
-        <span className={'entry-label ' + kind}>{title}</span>
-        <strong>{money(entry.price)}</strong>
-        {entry.quantity !== undefined && <span className="entry-quantity">{entry.quantity.toLocaleString('zh-CN')} 股</span>}
-        <time dateTime={entry.time}>{tradeDateLabel(entry.time)}</time>
+  return <ol className="cycle-trades" aria-label={label}>
+    {entries.map(entry => {
+      const { trade, sideIndex } = entry;
+      const side = trade.kind === 'buy' ? '买入' : '卖出';
+      return <li key={trade.kind + sideIndex}><button type="button" className="cycle-trade-row"
+        aria-label={side + '第 ' + (sideIndex + 1) + ' 笔详情'} onClick={() => open(entry)}>
+        <span className={'entry-label ' + trade.kind}>{side}</span>
+        <strong>{money(trade.price)}</strong>
+        <span className="muted">{trade.quantity === undefined ? '股数未知' : number.format(trade.quantity) + ' 股'}</span>
+        <time className="muted" dateTime={trade.time} title={tradeDateLabel(trade.time)}>{cycleTradeDate.format(new Date(trade.time))}</time>
       </button></li>;
     })}
   </ol>;
@@ -81,134 +86,119 @@ function RecordDetail({ entry, quote, missing }: { entry: PriceRecord; quote?: Q
   </>;
 }
 
-function priceComparison(label: string, price: number, reference: Pick<PriceRecord, 'price'>): string {
-  const change = percent(price - reference.price, reference.price);
-  return '较最近' + label + (change === 0 ? '持平' : (change > 0 ? '高 ' : '低 ') + Math.abs(change).toFixed(2) + '%');
-}
-
-function latestTrade(history: TradePrice[], kind: OrderKind): PriceRecord | undefined {
-  return history.reduce<PriceRecord | undefined>((previous, trade) =>
-    trade.kind === kind && (!previous || trade.time > previous.time) ? trade : previous, undefined);
-}
-
 function latestRecordedTrade(history: TradePrice[], kind: OrderKind, cached?: PriceRecord) {
   const loaded = latestTrade(history, kind);
-  return loaded && (!cached || loaded.time >= cached.time) ? loaded : cached;
+  return loaded && (!cached || Date.parse(loaded.time) >= Date.parse(cached.time)) ? loaded : cached;
 }
 
-function priceEstimate(quote?: Quote, reference?: PriceRecord, kind: OrderKind = 'buy', referenceLabel = kind === 'buy' ? '上次买入' : '上次卖出') {
-  const quantity = reference?.quantity;
-  if (!quote || !reference || quantity === undefined) return;
-  const cost = quote.price * quantity;
-  const buy = kind === 'buy';
-  const difference = (quote.price - reference.price) * quantity * (buy ? -1 : 1);
-  if (!Number.isSafeInteger(cost) || !Number.isSafeInteger(difference)) return;
-  const tone = difference > 0 ? 'gain' : difference < 0 ? 'loss' : '';
-  const rate = Math.abs(percent(quote.price - reference.price, reference.price)).toFixed(2);
-  const impact = difference === 0 ? '与' + referenceLabel + '同价' :
-    (difference > 0 ? (buy ? '省 ' : '多 ') : (buy ? '贵 ' : '少 ')) + money(Math.abs(difference));
-  const impactRate = difference === 0 ? '' : rate + '%';
-  return { quantity, cost, impact, impactRate, tone, kind };
-}
-
-function PriceImpact({ estimate }: { estimate: NonNullable<ReturnType<typeof priceEstimate>> }) {
-  return <span className="decision-impact"><span>{sideLabels[estimate.kind]} {number.format(estimate.quantity)} 股</span>
-    <strong className={'decision-impact-values ' + estimate.tone}>
-      <span>{estimate.impact}</span>
-      {estimate.impactRate && <span><span aria-hidden="true">· </span>{estimate.impactRate}</span>}
-    </strong></span>;
-}
-
-function cycleDecision(history: TradePrice[], quote: Quote | undefined, lastSell: PriceRecord | undefined, rules: ObservationRules) {
+function cycleDecision(history: TradePrice[], quote: Quote | undefined, buyObservation: boolean, rules: ObservationRules) {
   if (!history.length) return;
   try {
     const result = cycleResult(history);
     const quantity = result.unmatchedKind === 'buy' ? result.unmatched : 0;
-    const lowestLot = lowestRemainingBuy(result);
-    if (!quote) return { result, quantity, lowestLot, headline: '等待最新报价', tone: '' };
+    if (!quote) return { result, quantity };
 
     const profit = quantity ? sum([quote.price * quantity, -result.remainingBuyCost]) : undefined;
     const profitRate = profit === undefined ? undefined : percent(profit, result.remainingBuyCost);
-    const latestBuy = latestTrade(history, 'buy');
-    const buyDrop = rules.activeBuyDropFromBuy ?? defaultObservationRules.activeBuyDropFromBuy;
-    const belowSell = buyObservationMatches(quote.price, lastSell, true, rules);
-    const belowBuy = !!latestBuy && reachesBuyObservation(quote.price, latestBuy.price, buyDrop);
-    const buyObservation = [
-      belowSell && lastSell ? priceComparison('卖出', quote.price, lastSell) : '',
-      belowBuy && latestBuy ? priceComparison('买入', quote.price, latestBuy) : '',
-    ].filter(Boolean).join(' · ');
-    const estimate = priceEstimate(quote, latestBuy);
     const sellSignal = sellObservation(result, quote.price, rules);
-    const headline = sellSignal ? '卖出观察' : buyObservation ? '' : '观望';
-    const lowestSale = priceEstimate(quote, lowestLot, 'sell', '买价');
-    const headlineMetric = sellSignal?.scope === 'all' ? '全卖 ' + signedRate(profitRate!) : '';
     return {
-      result, quantity, profit, profitRate, estimate, buyObservation, headline, headlineMetric, lowestLot, lowestSale,
-      labelTone: sellSignal ? 'gain' : 'neutral',
-      tone: profit ? (profit > 0 ? 'gain' : 'loss') : '',
+      result, quantity, profit, profitRate,
+      buyObservation, sellObservation: !!sellSignal,
     };
   } catch {
     return;
   }
 }
 
-function DecisionSignals({ decision }: { decision: NonNullable<ReturnType<typeof cycleDecision>> }) {
+type ObservationRow = {
+  action: string; basis: string; quantity?: number; rate: number; totalChange?: number; matched: boolean; boughtAfterSell?: boolean;
+};
+
+function buyComparisonRow(price: number, trade: PriceRecord, basis: string, matched = false): ObservationRow {
+  const difference = price - trade.price;
+  return {
+    action: '买', basis, quantity: trade.quantity, rate: percent(difference, trade.price),
+    totalChange: trade.quantity === undefined ? undefined : difference * trade.quantity, matched,
+  };
+}
+
+function ObservationRows({ rows }: { rows: ObservationRow[] }) {
+  if (!rows.length) return null;
+  return <span className="overview-rules">
+    {rows.map(row => <span className={'overview-rule' + (row.matched ? ' matched' : '')} key={row.action + row.basis}>
+      <span className="overview-rule-action">{row.boughtAfterSell ? '卖出后已买入' : row.action + ' ' + (row.quantity === undefined ? '股数未知' : number.format(row.quantity) + ' 股')}</span>
+      <span className="overview-rule-basis">较{row.basis}</span>
+      <strong className={row.matched ? row.rate > 0 ? 'gain' : 'loss' : undefined}>
+        {row.matched && <span className="sr-only">已达标 </span>}
+        {signedRate(row.rate)}
+        {row.totalChange !== undefined && Number.isSafeInteger(row.totalChange) && <span> · {money(Math.abs(row.totalChange))}</span>}
+      </strong>
+    </span>)}
+  </span>;
+}
+
+function observationRows(quote: Quote | undefined, buyRow: ObservationRow | undefined,
+  decision: ReturnType<typeof cycleDecision>, rules: ObservationRules, recentTrade?: TradePrice): ObservationRow[] {
+  if (!quote) return [];
+  const price = quote.price;
+  const rows = buyRow ? [buyRow] : [];
+  if (decision?.quantity && decision.profitRate !== undefined && decision.profit !== undefined) {
+    const conditions = sellObservationConditions(decision.result, price, rules);
+    if (conditions) {
+      const { lot, lowest, whole } = conditions;
+      const sameSale = lot?.quantity === decision.quantity;
+      const latestLot = recentTrade?.kind === 'buy' ? decision.result.remainingBuyLots.find(
+        item => item.time === recentTrade.time && item.price === recentTrade.price,
+      ) : undefined;
+      const sellsAll = latestLot?.quantity === decision.quantity;
+      if (latestLot) rows.unshift({
+        action: '卖', basis: '周期最近成交（买）', quantity: latestLot.quantity,
+        rate: percent(price - latestLot.price, latestLot.price), totalChange: (price - latestLot.price) * latestLot.quantity,
+        matched: sellsAll ? !!decision.sellObservation : latestLot === lot && !!lowest,
+      });
+      if (!sellsAll) rows.push({ action: '全卖', basis: '剩余均价', quantity: decision.quantity, rate: decision.profitRate,
+        totalChange: decision.profit, matched: sameSale ? !!decision.sellObservation : whole });
+      if (lot && lot !== latestLot && !sameSale) rows.push({ action: '卖', basis: '剩余最低买价', quantity: lot.quantity,
+        rate: percent(price - lot.price, lot.price), totalChange: (price - lot.price) * lot.quantity, matched: !!lowest });
+    }
+  }
+  return rows;
+}
+
+function DecisionSignals({ decision, hasQuote, hasCycle, idleBuyObservation }: {
+  decision?: ReturnType<typeof cycleDecision>;
+  hasQuote: boolean;
+  hasCycle: boolean;
+  idleBuyObservation?: boolean;
+}) {
+  if (!hasQuote) return <span className="decision-label neutral">暂无行情</span>;
+  const buy = decision?.buyObservation || idleBuyObservation;
+  const sell = decision?.sellObservation;
+  if (!buy && !sell) return <span className="decision-label neutral">{hasCycle && !decision ? '暂无法测算' : '观望'}</span>;
   return <>
-    {decision.headline && <span className={'decision-label ' + (decision.labelTone ?? 'neutral')}>{decision.headline}</span>}
-    {decision.headlineMetric && <strong className={decision.labelTone ?? 'neutral'}>{decision.headlineMetric}</strong>}
-    {decision.buyObservation && <span className="decision-signal buy">
-      <span className="decision-label buy">买入观察</span><strong>{decision.buyObservation}</strong>
-    </span>}
+    {sell && <span className="decision-label gain">卖出观察</span>}
+    {buy && <span className="decision-label buy">买入观察</span>}
   </>;
 }
 
-function DecisionImpacts({ decision }: { decision: NonNullable<ReturnType<typeof cycleDecision>> }) {
-  const { lowestSale, estimate } = decision;
-  if (!lowestSale && !estimate) return null;
-
-  return <span className="decision-impacts">
-    {lowestSale && <PriceImpact estimate={lowestSale} />}
-    {estimate && <PriceImpact estimate={estimate} />}
-  </span>;
+function PositionIndicators(props: Parameters<typeof DecisionSignals>[0]) {
+  const { decision, hasCycle } = props;
+  return <>
+    <span className="decision-quantity">{hasCycle && !decision
+      ? '剩余股数未知' : '剩 ' + number.format(decision?.quantity ?? 0) + ' 股'}</span>
+    <DecisionSignals {...props} />
+  </>;
 }
 
-function RecentTradeImpacts({ estimates }: { estimates: NonNullable<ReturnType<typeof priceEstimate>>[] }) {
-  return <span className="decision-impacts recent-trade-impacts">
-    {estimates.map(estimate => <PriceImpact key={estimate.kind} estimate={estimate} />)}
-  </span>;
-}
-
-function CyclePosition({ decision }: { decision: ReturnType<typeof cycleDecision> }) {
-  if (!decision) return <p className="muted">本周期金额或股数超出可计算范围。</p>;
-  const { result, quantity, profit, profitRate, estimate, lowestLot } = decision;
-  return <details className="cycle-position" aria-label="本周期持仓与买价比较">
-    <summary>
-      <span className="decision-title">
-        {quantity > 0 && <strong>剩 {number.format(quantity)} 股</strong>}
-        <DecisionSignals decision={decision} />
-      </span><ChevronRight size={16} aria-hidden="true" />
-      <DecisionImpacts decision={decision} />
-    </summary>
-    <p className="decision-current">{quantity ? '剩余均价 ¥' + average(result.remainingBuyCost, quantity) : '本周期无剩余买入股数'}</p>
-    {lowestLot && <p className="muted">
-      最低买价批次 {money(lowestLot.price)} · {number.format(lowestLot.quantity)} 股
-    </p>}
-    <div className="decision-outcomes">
-      <div>
-        <h3>卖出 {number.format(quantity)} 股</h3>
-        <p>{profit === undefined ? (quantity ? '暂无估算' : '当前无可配对的买入股数') :
-          <><strong className={decision.tone}>{signedMoney(profit)}（{signedRate(profitRate!)}）</strong><br />卖出后本周期剩余 0 股</>}</p>
-      </div>
-      <div>
-        <h3>{estimate ? '买 ' + number.format(estimate.quantity) + ' 股' : '买入测算'}</h3>
-        {estimate ? <p>需 {money(estimate.cost)}<br />
-          <strong className={estimate.tone}>{estimate.impact}{estimate.impactRate && '（' + estimate.impactRate + '）'}</strong> · 相对上次买入金额</p> :
-          <p>需要最新报价和本周期最近买入的股数。</p>}
-      </div>
-    </div>
-    {result.skipped && <p className="muted">缺少股数的记录未计入。</p>}
-    <p className="muted">按最新报价估算，未扣手续费。</p>
-  </details>;
+function CyclePosition({ decision, rows, hasQuote }: {
+  decision: ReturnType<typeof cycleDecision>; rows: ObservationRow[]; hasQuote: boolean;
+}) {
+  return <div className="cycle-position">
+    <span className="decision-title">
+      <PositionIndicators decision={decision} hasQuote={hasQuote} hasCycle />
+    </span>
+    <ObservationRows rows={rows} />
+  </div>;
 }
 
 function PreviousCycle({ history, endedAt }: { history: TradePrice[]; endedAt: string }) {
@@ -345,19 +335,33 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
     const dayTone = dayChange === undefined || dayChange === 0 ? '' : dayChange > 0 ? 'gain' : 'loss';
     const history = tradePrices(stock, ledger.orders);
     const cycle = activeCycle(stock, history);
-    const latest = missing.has(symbol) ? undefined : quote;
     const recent = recentPrices(stock, ledger.orders);
     const lastRecordedBuy = latestRecordedTrade(history, 'buy', recent.buy[0]);
     const lastRecordedSell = latestRecordedTrade(history, 'sell', recent.sell[0]);
-    const lastSell = cycle.length ? latestTrade(cycle, 'sell') : lastRecordedSell;
-    const decision = cycleDecision(cycle, latest, lastSell, rules);
-    const recentEstimates = !cycle.length || decision?.quantity === 0
-      ? [priceEstimate(latest, lastRecordedSell, 'sell'), priceEstimate(latest, lastRecordedBuy)].filter(estimate => estimate !== undefined)
-      : [];
-    const idleComparison = latest && lastSell ? priceComparison('卖出', latest.price, lastSell) : '';
-    const buyObservation = latest && !cycle.length && buyObservationMatches(latest.price, lastSell, false, rules) ? idleComparison : '';
+    const recentTrade = latestTrade(cycle);
+    const reference = recentTrade ?? lastRecordedSell;
+    const hasCycle = cycle.length > 0;
+    const buyMatched = !!quote && buyObservationMatches(quote.price, reference, hasCycle, rules, lastRecordedBuy);
+    const buyRow = quote && reference ? {
+      ...buyComparisonRow(quote.price, reference, recentTrade ? '周期最近成交（' + sideLabels[recentTrade.kind] + '）' : '最近卖价', buyMatched),
+      boughtAfterSell: !hasCycle && boughtAfterSell(reference, lastRecordedBuy),
+    } : undefined;
+    const decision = cycleDecision(cycle, quote, buyMatched, rules);
+    const comparisons = observationRows(quote, buyRow, decision, rules, recentTrade);
+    const rows = recentTrade?.kind === 'buy' ? comparisons.filter(row => row !== buyRow) : comparisons;
+    const primary = rows[0];
+    const oppositeTrade = recentTrade?.kind === 'buy' ? latestTrade(cycle, 'sell') : lastRecordedBuy;
+    const supplement = quote && primary && oppositeTrade && recentTrade && primary.basis.startsWith('周期最近成交')
+      ? {
+        ...buyComparisonRow(quote.price, { ...oppositeTrade, quantity: primary.quantity },
+          recentTrade.kind === 'buy' ? '周期最近卖出' : '最近买入'),
+        action: primary.action,
+      }
+      : undefined;
+    const cardRows = supplement ? [...comparisons.slice(0, 1), supplement, ...rows.slice(1)] : rows;
+    const idleBuyObservation = !hasCycle && buyMatched;
     return {
-      stock, symbol, quote, latest, dayChange, dayRate, dayTone, history, cycle, idleComparison, recentEstimates, buyObservation,
+      stock, symbol, quote, dayChange, dayRate, dayTone, history, cycle, rows, cardRows, idleBuyObservation,
       name: quote?.name ?? stock.name,
       decision, lastRecordedBuy, lastRecordedSell,
     };
@@ -376,11 +380,9 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
     {cards.length > 1 && <section className="panel decision-overview" aria-label="持仓速览">
       <h2>持仓速览</h2>
       <ul>
-        {cards.map(({ stock, name, latest, dayRate, dayTone, decision, cycle, idleComparison, recentEstimates, buyObservation }) => <li key={stock.id}>
+        {cards.map(({ stock, symbol, name, quote, dayRate, dayTone, decision, cycle, rows, idleBuyObservation }) => <li key={stock.id}>
           <button type="button" onClick={event => {
             const card = document.getElementById('holding-' + stock.id);
-            const details = card?.querySelector('details.cycle-position');
-            if (details instanceof HTMLDetailsElement) details.open = true;
             card?.scrollIntoView({ block: 'start' });
             if (event.detail === 0) card?.focus({ preventScroll: true });
           }}>
@@ -388,33 +390,30 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
               <span className="decision-overview-heading">
                 <span className="decision-title">
                   <strong>{name}</strong>
-                  {decision && decision.quantity > 0 && <span className="decision-quantity">剩 {number.format(decision.quantity)} 股</span>}
-                  {decision ? <DecisionSignals decision={decision} /> : <>
-                    <span className={'decision-label ' + (buyObservation ? 'buy' : 'neutral')}>
-                      {buyObservation ? '买入观察' : cycle.length ? '暂无法测算' : '观望'}
-                    </span>
-                    {buyObservation && <strong className="buy">{buyObservation}</strong>}
-                  </>}
+                  <PositionIndicators decision={decision} hasQuote={!!quote} hasCycle={!!cycle.length} idleBuyObservation={idleBuyObservation} />
                 </span>
-                {latest && <span className="decision-overview-quote">
-                  <strong aria-label={'最新价 ' + money(latest.price)}>{money(latest.price)}</strong>
+                {quote && <span className="decision-overview-quote">
+                  {missing.has(symbol) && <span className="muted">上次报价</span>}
+                  <strong aria-label={(missing.has(symbol) ? '上次报价 ' : '最新价 ') + money(quote.price)}>{money(quote.price)}</strong>
                   {dayRate !== undefined && <span className={dayTone} aria-label={'当日涨跌幅 ' + signedRate(dayRate)}>{signedRate(dayRate)}</span>}
                 </span>}
               </span>
-              {recentEstimates.length > 0 ? <RecentTradeImpacts estimates={recentEstimates} /> : decision && <DecisionImpacts decision={decision} />}
-              {!cycle.length && !buyObservation && idleComparison && <span className="decision-comparison muted">{idleComparison}</span>}
+              <ObservationRows rows={rows} />
             </span>
             <ChevronRight size={16} aria-hidden="true" />
           </button>
         </li>)}
       </ul>
-      <p className="muted">周期盈亏和最近成交价对比均未扣手续费。</p>
+      <p className="muted">各行百分比按对应参考价计算，未扣手续费。</p>
     </section>}
     <div className="stock-grid">
-      {cards.map(({ stock, symbol, quote, dayChange, dayRate, dayTone, history, cycle, name, decision, idleComparison, recentEstimates, buyObservation }) => {
+      {cards.map(({ stock, symbol, quote, dayChange, dayRate, dayTone, history, cycle, name, decision, cardRows, idleBuyObservation }) => {
         const lastEnded = stock.cycles?.at(-1);
-        const buys = cycle.filter(item => item.kind === 'buy');
-        const sells = cycle.filter(item => item.kind === 'sell');
+        const counts = { buy: 0, sell: 0 };
+        const trades = [...cycle].sort((a, b) => Date.parse(b.time) - Date.parse(a.time))
+          .map(trade => ({ trade, sideIndex: counts[trade.kind]++ }));
+        const openTrade = ({ trade, sideIndex }: CycleEntry) =>
+          open({ type: 'detail', stock, kind: trade.kind, entry: trade, index: sideIndex });
         return <article className="panel watch-card" key={stock.id} id={'holding-' + stock.id} tabIndex={-1}>
           <div className="watch-heading">
             <div><h2>{name}</h2><p className="muted">{stock.market} · {stock.code}</p></div>
@@ -426,7 +425,7 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
             </div>
           </div>
           <div className="watch-quote">
-            <span className="muted">最新价</span>
+            <span className="muted">{quote && missing.has(symbol) ? '上次报价' : '最新价'}</span>
             <div className="watch-quote-values">
               <strong>{quote ? money(quote.price) : '—'}</strong>
               {dayChange !== undefined && dayRate !== undefined && <span className={'watch-day-change ' + dayTone} aria-label={'当日涨跌 ' + signedMoney(dayChange) + ' ' + signedRate(dayRate)}>
@@ -435,33 +434,26 @@ export function Watchlist({ ledger, busy, add, record, endCycle, removeTrade, re
             </div>
             <span className="muted">{quote ? '腾讯财经 · ' + quoteTime.format(new Date(quote.time)) + (missing.has(symbol) ? ' · 更新失败' : '') : missing.has(symbol) ? '行情暂不可用' : '等待报价'}</span>
           </div>
-          <p className="muted watch-cycle-count">{cycle.length ? '本周期 · 买入 ' + buys.length + ' 笔 · 卖出 ' + sells.length + ' 笔' : '暂无进行中的周期'}</p>
-          {!cycle.length && buyObservation ? <p className="decision-title watch-cycle-count">
-            <span className="decision-label buy">买入观察</span><strong className="buy">{buyObservation}</strong>
-          </p> : !cycle.length && idleComparison && <p className="muted watch-cycle-count">最新价{idleComparison}</p>}
-          {!cycle.length && recentEstimates.length > 0 && <RecentTradeImpacts estimates={recentEstimates} />}
-          {cycle.length > 0 && <>
-            <CyclePosition decision={decision} />
-            <div className="price-headings" aria-hidden="true"><span>周期内买入</span><span>周期内卖出</span></div>
-            <div className="price-sides">
-              <PriceSide kind="buy" records={buys} open={(entry, index) => open({ type: 'detail', kind: 'buy', stock, entry, index })} />
-              <PriceSide kind="sell" records={sells} open={(entry, index) => open({ type: 'detail', kind: 'sell', stock, entry, index })} />
+          {cycle.length > 0 ? <>
+            <CyclePosition decision={decision} rows={cardRows} hasQuote={!!quote} />
+            <div className="cycle-trade-heading">
+              <h3>本周期成交</h3>
+              <span className="muted">买入 {counts.buy} 笔 · 卖出 {counts.sell} 笔</span>
             </div>
+            <CycleTradeList entries={trades.slice(0, 6)} open={openTrade} label="本周期最近成交" />
+            {trades.length > 6 && <details className="watch-cycle-more">
+              <summary>展开更早的 {trades.length - 6} 笔成交</summary>
+              <CycleTradeList entries={trades.slice(6)} open={openTrade} label="本周期更早成交" />
+            </details>}
+          </> : <>
+            <p className="muted watch-cycle-count">暂无进行中的周期</p>
+            {cardRows.length > 0 && <div className="cycle-position">
+              <span className="decision-title">
+                <PositionIndicators hasQuote={!!quote} hasCycle={false} idleBuyObservation={idleBuyObservation} />
+              </span>
+              <ObservationRows rows={cardRows} />
+            </div>}
           </>}
-          {(buys.length > 3 || sells.length > 3) && <details className="watch-cycle-more">
-            <summary>展开本周期全部 {cycle.length} 笔记录</summary>
-            <ul className="cycle-records">
-              {cycle.map((item, index) => <li key={index}>
-                <button type="button" className="cycle-entry" onClick={() => open({
-                  type: 'detail', stock, kind: item.kind, entry: item,
-                  index: (item.kind === 'buy' ? buys : sells).indexOf(item),
-                })}>
-                  <span>{item.kind === 'buy' ? '买入' : '卖出'} · {tradeDateLabel(item.time)}</span>
-                  <strong>{money(item.price)}{item.quantity === undefined ? '' : ' · ' + number.format(item.quantity) + ' 股'}</strong>
-                </button>
-              </li>)}
-            </ul>
-          </details>}
           {!cycle.length && lastEnded && <PreviousCycle endedAt={lastEnded.endedAt}
             history={history.slice(cycle.length, cycle.length + lastEnded.count)} />}
           <div className="card-actions">

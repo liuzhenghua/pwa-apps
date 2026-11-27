@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { activeCycle, buyObservationMatches, defaultObservationRules, cycleResult, deleteTrade, finishCycle, compareSellPrice, emptyLedger, reachesBuyObservation, recentPrices, remainingPosition, recordPrice, sharesForAmount, sellObservation, tradePrices, validateLedger } from '../src/domain.ts';
+import { activeCycle, buyObservationMatches, defaultObservationRules, cycleResult, deleteTrade, finishCycle, compareSellPrice, emptyLedger, latestTrade, reachesBuyObservation, recentPrices, remainingPosition, recordPrice, sharesForAmount, sellObservation, tradePrices, validateLedger } from '../src/domain.ts';
 import { parseQuotes } from '../src/quotes.ts';
 
 const stock = { id: 'test', name: '600000', code: '600000', market: '沪市', price: 0, priceUpdatedAt: '2026-11-23T01:30:00.000Z' };
@@ -152,11 +152,21 @@ test('sell observation prefers the whole cycle above average and otherwise uses 
   assert.deepEqual(sellObservation(partial, 1224), { scope: 'all', quantity: 50 });
 });
 
-test('buy observation uses the last sell and sell observation combines its configured thresholds', () => {
+test('buy observation follows the latest cycle trade and sell observation combines its configured thresholds', () => {
   const latestSell = { ...entry(1200, 33), quantity: 100 };
   assert.equal(buyObservationMatches(1188, latestSell, false, defaultObservationRules), false);
   assert.equal(buyObservationMatches(1176, latestSell, false, defaultObservationRules), true);
   assert.equal(buyObservationMatches(1188, latestSell, true, defaultObservationRules), true);
+  const boughtLater = { ...entry(1180, 34), kind: 'buy', quantity: 50 };
+  const firstSell = { ...latestSell, kind: 'sell' };
+  const latestBuyReference = latestTrade([firstSell, boughtLater]);
+  assert.equal(latestBuyReference, boughtLater);
+  assert.equal(buyObservationMatches(1176, latestBuyReference, true, defaultObservationRules), false);
+  assert.equal(buyObservationMatches(1168, latestBuyReference, true, defaultObservationRules), true);
+  assert.equal(buyObservationMatches(1176, latestSell, false, defaultObservationRules, boughtLater), false);
+  const newerSell = { ...entry(1200, 35), kind: 'sell' };
+  assert.equal(latestTrade([boughtLater, firstSell, newerSell]), newerSell);
+  assert.equal(buyObservationMatches(1188, newerSell, true, defaultObservationRules), true);
   assert.equal(buyObservationMatches(1188, undefined, true, defaultObservationRules), false);
   assert.equal(buyObservationMatches(1188, latestSell, true, { ...defaultObservationRules, activeBuyDrop: 2 }), false);
   const mixed = cycleResult([

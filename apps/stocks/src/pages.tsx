@@ -42,7 +42,6 @@ function ObservationSettings({ rules, busy, save, feedback }: {
     try {
       save(validateObservationRules({
         activeBuyDrop: Number(data.get('activeBuyDrop')),
-        activeBuyDropFromBuy: Number(data.get('activeBuyDropFromBuy')),
         idleBuyDrop: Number(data.get('idleBuyDrop')),
         sellAboveAverage: Number(data.get('sellAboveAverage')),
         sellAboveLastBuy: Number(data.get('sellAboveLastBuy')),
@@ -58,8 +57,7 @@ function ObservationSettings({ rules, busy, save, feedback }: {
     <h2>买卖观察规则</h2>
     <fieldset disabled={busy}>
       <legend>买入观察</legend>
-      <RuleThreshold name="activeBuyDrop" label="周期内较最近卖价回落" value={rules.activeBuyDrop} />
-      <RuleThreshold name="activeBuyDropFromBuy" label="周期内较最近买价回落" value={rules.activeBuyDropFromBuy ?? defaultObservationRules.activeBuyDropFromBuy} />
+      <RuleThreshold name="activeBuyDrop" label="周期内较最近成交回落" value={rules.activeBuyDrop} />
       <RuleThreshold name="idleBuyDrop" label="无周期时较最近卖价回落" value={rules.idleBuyDrop} />
     </fieldset>
     <fieldset disabled={busy}>

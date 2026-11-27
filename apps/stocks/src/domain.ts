@@ -46,7 +46,6 @@ export type Sell = Order & { kind: 'sell'; matches: Match[] };
 export type RuleMatch = 'any' | 'all';
 export type ObservationRules = {
   activeBuyDrop: number;
-  activeBuyDropFromBuy?: number;
   idleBuyDrop: number;
   sellAboveAverage: number;
   // Keep the persisted key so existing observation settings retain their threshold.
@@ -54,13 +53,12 @@ export type ObservationRules = {
   sellMatch: RuleMatch;
 };
 export const defaultObservationRules: Required<ObservationRules> = {
-  activeBuyDrop: 1, activeBuyDropFromBuy: 2, idleBuyDrop: 2,
+  activeBuyDrop: 1, idleBuyDrop: 2,
   sellAboveAverage: 2, sellAboveLastBuy: 2, sellMatch: 'any',
 };
 
 export function validateObservationRules(rules: ObservationRules): ObservationRules {
   const thresholds = [rules.activeBuyDrop, rules.idleBuyDrop, rules.sellAboveAverage, rules.sellAboveLastBuy];
-  if (rules.activeBuyDropFromBuy !== undefined) thresholds.push(rules.activeBuyDropFromBuy);
   if (thresholds.some(value => !Number.isFinite(value) || value <= 0 || value > 100)) throw Error('阈值须大于 0%，且不超过 100%');
   if (rules.sellMatch !== 'any' && rules.sellMatch !== 'all') throw Error('请选择条件组合方式');
   return rules;
@@ -510,8 +508,18 @@ export function cycleResult(history: TradePrice[], matchRecentBuys = true) {
   };
 }
 
-export function buyObservationMatches(price: number, lastSell: PriceRecord | undefined, active: boolean, rules: ObservationRules): boolean {
-  return !!lastSell && reachesBuyObservation(price, lastSell.price, active ? rules.activeBuyDrop : rules.idleBuyDrop);
+export function boughtAfterSell(lastSell?: PriceRecord, lastBuy?: PriceRecord): boolean {
+  return !!lastSell && !!lastBuy && Date.parse(lastBuy.time) > Date.parse(lastSell.time);
+}
+
+export function latestTrade(history: TradePrice[], kind?: OrderKind): TradePrice | undefined {
+  return history.reduce<TradePrice | undefined>((previous, trade) =>
+    (!kind || trade.kind === kind) && (!previous || Date.parse(trade.time) > Date.parse(previous.time)) ? trade : previous, undefined);
+}
+
+export function buyObservationMatches(price: number, reference: PriceRecord | undefined, active: boolean, rules: ObservationRules, lastBuy?: PriceRecord): boolean {
+  return !!reference && (active || !boughtAfterSell(reference, lastBuy)) &&
+    reachesBuyObservation(price, reference.price, active ? rules.activeBuyDrop : rules.idleBuyDrop);
 }
 
 export function lowestRemainingBuy(position: ReturnType<typeof cycleResult>) {
@@ -519,15 +527,22 @@ export function lowestRemainingBuy(position: ReturnType<typeof cycleResult>) {
     !lowest || lot.price < lowest.price ? lot : lowest, undefined);
 }
 
-export function sellObservation(position: ReturnType<typeof cycleResult>, price: number, rules: ObservationRules = defaultObservationRules) {
+export function sellObservationConditions(position: ReturnType<typeof cycleResult>, price: number, rules: ObservationRules) {
   if (position.unmatchedKind !== 'buy') return;
   const marketValue = decimal(price).times(position.unmatched);
   const whole = marketValue.times(100).gte(decimal(position.remainingBuyCost).times(decimal(100).plus(rules.sellAboveAverage)));
   const lot = lowestRemainingBuy(position);
   const lowest = lot && decimal(price).times(100).gte(decimal(lot.price).times(decimal(100).plus(rules.sellAboveLastBuy)));
+  return { whole, lowest, lot };
+}
+
+export function sellObservation(position: ReturnType<typeof cycleResult>, price: number, rules: ObservationRules = defaultObservationRules) {
+  const conditions = sellObservationConditions(position, price, rules);
+  if (!conditions) return;
+  const { whole, lowest, lot } = conditions;
   if (rules.sellMatch === 'all' && !(whole && lowest)) return;
   if (whole) return { scope: 'all' as const, quantity: position.unmatched };
-  if (lowest) return { scope: 'lowest-buy' as const, quantity: lot.quantity };
+  if (lowest && lot) return { scope: 'lowest-buy' as const, quantity: lot.quantity };
 }
 
 function validatePriceRecord(record: PriceRecord) {
